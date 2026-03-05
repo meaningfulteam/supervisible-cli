@@ -1,0 +1,61 @@
+version: 2
+
+project_name: supervisible
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: supervisible
+    binary: supervisible
+    main: ./cmd/supervisible
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/supervisible/supervisible-cli/internal/version.Version={{ .Version }}
+      - -X github.com/supervisible/supervisible-cli/internal/version.Commit={{ .Commit }}
+      - -X github.com/supervisible/supervisible-cli/internal/version.Date={{ .Date }}
+
+archives:
+  - id: archives
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  use: git
+
+brews:
+  - name: supervisible
+    ids: [supervisible]
+    homepage: https://supervisible.com
+    description: Supervisible command-line interface
+    license: MIT
+    repository:
+      owner: supervisible
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: supervisible-bot
+      email: ops@supervisible.com
+    install: |
+      bin.install "supervisible"
+    test: |
+      system "#{bin}/supervisible", "version"

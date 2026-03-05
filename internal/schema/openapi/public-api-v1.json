@@ -1,0 +1,1516 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Supervisible Public API V1",
+    "version": "v1",
+    "description": "Organization-scoped API for third-party integrations and automation."
+  },
+  "servers": [
+    {
+      "url": "/api/v1"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "API Key"
+      }
+    }
+  },
+  "paths": {
+    "/me": {
+      "get": {
+        "summary": "Get API key identity",
+        "description": "Returns metadata for the authenticated API key and actor identity.",
+        "tags": ["me"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": null,
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "keyId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                    "keyName": "Zapier Sync",
+                    "organizationId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                    "actorUserId": "019cb675-c4df-7f8b-8a83-5f28581f5e7e",
+                    "scopes": ["read:users", "write:projects"]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/users": {
+      "get": {
+        "summary": "List users",
+        "tags": ["users"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "read:users",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Number of rows (default 50, max 200).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/users/{user_id}": {
+      "patch": {
+        "summary": "Update a user",
+        "tags": ["users"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:users",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "description": "User ID.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Display name."
+                  },
+                  "image": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Avatar URL."
+                  },
+                  "countryCode": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "ISO 3166-1 alpha-2 country code."
+                  },
+                  "defaultAvailability": {
+                    "type": "number",
+                    "description": "Default weekly availability in hours."
+                  },
+                  "reportsToId": {
+                    "type": "string",
+                    "description": "Manager user ID."
+                  }
+                },
+                "required": [],
+                "example": {
+                  "name": "Updated Name",
+                  "defaultAvailability": 40
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "name": "Updated Name",
+                    "defaultAvailability": 40
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/clients": {
+      "get": {
+        "summary": "List clients",
+        "tags": ["clients"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "read:clients",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Number of rows (default 50, max 200).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a client",
+        "tags": ["clients"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:clients",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "companyName": {
+                    "type": "string",
+                    "description": "Client name."
+                  },
+                  "email": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Client contact email."
+                  },
+                  "image": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Logo URL."
+                  },
+                  "countryCode": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "ISO country code."
+                  },
+                  "website": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Company website URL."
+                  },
+                  "isActive": {
+                    "type": "boolean",
+                    "description": "Active status."
+                  },
+                  "clientPriority": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low"],
+                    "description": "Priority level."
+                  },
+                  "categories": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Client categories."
+                  },
+                  "accountManagerId": {
+                    "type": "string",
+                    "description": "Account manager user ID."
+                  }
+                },
+                "required": ["companyName"],
+                "example": {
+                  "companyName": "Acme CRM",
+                  "website": "https://acme.example",
+                  "clientPriority": "high"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "companyName": "Acme CRM",
+                    "website": "https://acme.example",
+                    "clientPriority": "high"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/clients/{client_id}": {
+      "patch": {
+        "summary": "Update a client",
+        "tags": ["clients"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:clients",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "client_id",
+            "required": true,
+            "description": "Client ID.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "companyName": {
+                    "type": "string",
+                    "description": "Client name."
+                  },
+                  "email": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Client contact email."
+                  },
+                  "image": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Logo URL."
+                  },
+                  "countryCode": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "ISO country code."
+                  },
+                  "website": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Company website URL."
+                  },
+                  "isActive": {
+                    "type": "boolean",
+                    "description": "Active status."
+                  },
+                  "clientPriority": {
+                    "type": "string",
+                    "enum": ["high", "medium", "low"],
+                    "description": "Priority level."
+                  },
+                  "categories": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Client categories."
+                  },
+                  "accountManagerId": {
+                    "type": "string",
+                    "description": "Account manager user ID."
+                  }
+                },
+                "required": [],
+                "example": {
+                  "companyName": "Acme CRM Updated"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "companyName": "Acme CRM Updated"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/projects": {
+      "get": {
+        "summary": "List projects",
+        "tags": ["projects"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "read:projects",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Number of rows (default 50, max 200).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a project",
+        "tags": ["projects"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:projects",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Project name."
+                  },
+                  "clientId": {
+                    "type": "string",
+                    "description": "Client ID."
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "description": "Project start date."
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "description": "Project end date."
+                  },
+                  "objective": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Project objective."
+                  },
+                  "projectManagerId": {
+                    "type": "string",
+                    "description": "Project manager user ID."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["draft", "planned", "active", "completed", "cancelled"],
+                    "description": "Project status."
+                  },
+                  "billingType": {
+                    "type": "string",
+                    "enum": ["fixed_price", "retainer", "time_materials", "non_billable"],
+                    "description": "Project billing type."
+                  },
+                  "amount": {
+                    "type": "number",
+                    "description": "Project amount for fixed or retainer billing."
+                  },
+                  "hourlyRate": {
+                    "type": "number",
+                    "description": "Hourly rate for time & materials billing."
+                  }
+                },
+                "required": ["name", "clientId", "startDate", "endDate"],
+                "example": {
+                  "name": "CRM Sync Project",
+                  "clientId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                  "startDate": "2026-01-01",
+                  "endDate": "2026-03-01",
+                  "status": "planned"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "name": "CRM Sync Project",
+                    "clientId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                    "startDate": "2026-01-01",
+                    "endDate": "2026-03-01",
+                    "status": "planned"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/projects/{project_id}": {
+      "patch": {
+        "summary": "Update a project",
+        "tags": ["projects"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:projects",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "description": "Project ID.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Project name."
+                  },
+                  "objective": {
+                    "type": "string",
+                    "enum": ["string", "null"],
+                    "description": "Project objective."
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "description": "Project start date."
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "description": "Project end date."
+                  },
+                  "projectManagerId": {
+                    "type": "string",
+                    "description": "Project manager user ID."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["draft", "planned", "active", "completed", "cancelled"],
+                    "description": "Project status."
+                  }
+                },
+                "required": [],
+                "example": {
+                  "status": "active"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "status": "active"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/assignments": {
+      "get": {
+        "summary": "List user assignments",
+        "description": "Returns planned user assignments scoped to your organization.",
+        "tags": ["assignments"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "read:assignments",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "description": "Filter by user.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "description": "Filter by project.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "description": "Include assignments on/after this date.",
+            "schema": {
+              "type": "string",
+              "description": "Date in YYYY-MM-DD format"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "description": "Include assignments on/before this date.",
+            "schema": {
+              "type": "string",
+              "description": "Date in YYYY-MM-DD format"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Number of rows (default 50, max 200).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "summary": "Upsert user assignments",
+        "description": "Creates or updates assignment rows by unique key (user, project, capability, date).",
+        "tags": ["assignments"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:assignments",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Bulk upsert payload."
+                  }
+                },
+                "required": ["items"],
+                "example": {
+                  "items": [
+                    {
+                      "userId": "019cb675-c4df-7f8b-8a83-5f28581f5e7e",
+                      "projectId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                      "capabilityId": null,
+                      "date": "2026-01-06",
+                      "hours": 8
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    {
+                      "id": "019cb675-c4df-7f8b-8a83-5f28581f5e7e",
+                      "userId": "019cb675-c4df-7f8b-8a83-5f28581f5e7e",
+                      "projectId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                      "capabilityId": null,
+                      "date": "2026-01-06",
+                      "hours": 8
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/actual-hours": {
+      "get": {
+        "summary": "List actual hours",
+        "description": "Returns submitted/actual hours scoped to your organization.",
+        "tags": ["actual-hours"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "read:actual_hours",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "description": "Filter by user.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project_id",
+            "required": false,
+            "description": "Filter by project.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "description": "Include rows on/after this date.",
+            "schema": {
+              "type": "string",
+              "description": "Date in YYYY-MM-DD format"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "description": "Include rows on/before this date.",
+            "schema": {
+              "type": "string",
+              "description": "Date in YYYY-MM-DD format"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Number of rows (default 50, max 200).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "summary": "Upsert actual hours",
+        "description": "Creates or updates actual-hour rows by unique key (user, project, capability, date).",
+        "tags": ["actual-hours"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:actual_hours",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "description": "Bulk upsert payload."
+                  }
+                },
+                "required": ["items"],
+                "example": {
+                  "items": [
+                    {
+                      "userId": "019cb675-c4df-7f8b-8a83-5f28581f5e7e",
+                      "projectId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                      "capabilityId": null,
+                      "date": "2026-01-06",
+                      "hours": 7
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "items": [
+                      {
+                        "userId": "019cb675-c4df-7f8b-8a83-5f28581f5e7e",
+                        "projectId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                        "capabilityId": null,
+                        "date": "2026-01-06",
+                        "hours": 7
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/time-off": {
+      "get": {
+        "summary": "List time off requests",
+        "tags": ["time-off"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "read:time_off",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "user_id",
+            "required": false,
+            "description": "Filter by user.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "description": "Filter by request status.",
+            "schema": {
+              "type": "string",
+              "enum": ["pending", "approved", "rejected"]
+            }
+          },
+          {
+            "in": "query",
+            "name": "start_date",
+            "required": false,
+            "description": "Include requests ending on/after this date.",
+            "schema": {
+              "type": "string",
+              "description": "Date in YYYY-MM-DD format"
+            }
+          },
+          {
+            "in": "query",
+            "name": "end_date",
+            "required": false,
+            "description": "Include requests starting on/before this date.",
+            "schema": {
+              "type": "string",
+              "description": "Date in YYYY-MM-DD format"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Number of rows (default 50, max 200).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "post": {
+        "summary": "Create a time off request",
+        "tags": ["time-off"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:time_off",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "userId": {
+                    "type": "string",
+                    "description": "Requesting user ID."
+                  },
+                  "timeOffTypeId": {
+                    "type": "string",
+                    "description": "Time off type ID."
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "description": "Start date."
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "description": "End date."
+                  },
+                  "availability": {
+                    "type": "number",
+                    "description": "Daily available hours (0-24)."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "Reason for request."
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": ["pending", "approved", "rejected"],
+                    "description": "Optional initial status. Use pending for normal request flow."
+                  }
+                },
+                "required": ["userId", "timeOffTypeId", "startDate", "endDate", "availability", "reason"],
+                "example": {
+                  "userId": "019cb675-c4df-7f8b-8a83-5f28581f5e7e",
+                  "timeOffTypeId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                  "startDate": "2026-02-03",
+                  "endDate": "2026-02-05",
+                  "availability": 0,
+                  "reason": "Vacation",
+                  "status": "pending"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "userId": "019cb675-c4df-7f8b-8a83-5f28581f5e7e",
+                    "timeOffTypeId": "019cb675-c4d6-7e90-8806-25e5145c3a06",
+                    "startDate": "2026-02-03",
+                    "endDate": "2026-02-05",
+                    "availability": 0,
+                    "reason": "Vacation",
+                    "status": "pending"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/time-off/{request_id}": {
+      "patch": {
+        "summary": "Update a time off request",
+        "tags": ["time-off"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:time_off",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "description": "Time off request ID.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "timeOffTypeId": {
+                    "type": "string",
+                    "description": "Updated time off type."
+                  },
+                  "startDate": {
+                    "type": "string",
+                    "description": "Updated start date."
+                  },
+                  "endDate": {
+                    "type": "string",
+                    "description": "Updated end date."
+                  },
+                  "availability": {
+                    "type": "number",
+                    "description": "Updated daily available hours (0-24)."
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "Updated reason."
+                  }
+                },
+                "required": [],
+                "example": {
+                  "reason": "Vacation updated"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "reason": "Vacation updated"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      },
+      "delete": {
+        "summary": "Delete a time off request",
+        "tags": ["time-off"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:time_off",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "description": "Time off request ID.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/time-off/{request_id}/approve": {
+      "post": {
+        "summary": "Approve a time off request",
+        "description": "Requires manager/admin approval permissions for the requesting user.",
+        "tags": ["time-off"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:time_off",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "description": "Time off request ID.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {}
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
+    "/time-off/{request_id}/reject": {
+      "post": {
+        "summary": "Reject a time off request",
+        "description": "Requires manager/admin approval permissions for the requesting user.",
+        "tags": ["time-off"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:time_off",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "description": "Time off request ID.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "rejectionReason": {
+                    "type": "string",
+                    "description": "Human-readable reason for rejection."
+                  }
+                },
+                "required": ["rejectionReason"],
+                "example": {
+                  "rejectionReason": "Coverage needed this week"
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": {
+                    "rejectionReason": "Coverage needed this week"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    }
+  }
+}
