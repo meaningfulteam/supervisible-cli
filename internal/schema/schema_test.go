@@ -23,3 +23,17 @@ func TestProviderLoadsEmbeddedSchema(t *testing.T) {
 		t.Fatalf("unexpected path %s", endpoint.Path)
 	}
 }
+
+func TestExpandQueryParamSupported(t *testing.T) {
+	provider, err := NewProvider(context.Background())
+	if err != nil {
+		t.Fatalf("NewProvider() error = %v", err)
+	}
+
+	endpoints := []string{"/users", "/clients", "/projects", "/assignments", "/actual-hours", "/time-off"}
+	for _, ep := range endpoints {
+		if !provider.SupportsQueryParam("GET", ep, "expand") {
+			t.Errorf("expected GET %s to support expand query param", ep)
+		}
+	}
+}

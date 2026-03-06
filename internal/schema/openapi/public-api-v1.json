@@ -91,6 +91,15 @@
             "schema": {
               "type": "number"
             }
+          },
+          {
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "description": "Comma-separated list of relationships to expand. Valid values: reportsTo.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -236,6 +245,15 @@
             "description": "Pagination offset (default 0).",
             "schema": {
               "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "description": "Comma-separated list of relationships to expand. Valid values: accountManager, createdByUser.",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -502,6 +520,15 @@
             "description": "Pagination offset (default 0).",
             "schema": {
               "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "description": "Comma-separated list of relationships to expand. Valid values: client, projectManager.",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -795,6 +822,15 @@
             "schema": {
               "type": "number"
             }
+          },
+          {
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "description": "Comma-separated list of relationships to expand. Valid values: user, project, capability.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -967,6 +1003,15 @@
             "schema": {
               "type": "number"
             }
+          },
+          {
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "description": "Comma-separated list of relationships to expand. Valid values: user, project, capability.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -1138,6 +1183,15 @@
             "description": "Pagination offset (default 0).",
             "schema": {
               "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "expand",
+            "required": false,
+            "description": "Comma-separated list of relationships to expand. Valid values: user, timeOffType, approvedBy.",
+            "schema": {
+              "type": "string"
             }
           }
         ],

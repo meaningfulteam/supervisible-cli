@@ -42,6 +42,7 @@ type App struct {
 	paramsQuery url.Values
 	fields      string
 	fieldList   []string
+	expand      string
 	dryRun      bool
 	schema      *schema.Provider
 }
@@ -99,6 +100,10 @@ func (a *App) ResolvedQuery(method, endpoint string, base url.Values) url.Values
 
 	if a.fields != "" && a.schema != nil && a.schema.SupportsQueryParam(method, endpoint, "fields") {
 		out.Set("fields", a.fields)
+	}
+
+	if a.expand != "" && a.schema != nil && a.schema.SupportsQueryParam(method, endpoint, "expand") {
+		out.Set("expand", a.expand)
 	}
 
 	for key, values := range a.paramsQuery {
@@ -192,6 +197,7 @@ func NewRootCommand() *cobra.Command {
 		flagTimeout    time.Duration
 		flagParams     string
 		flagFields     string
+		flagExpand     string
 		flagDryRun     bool
 	)
 
@@ -251,6 +257,7 @@ func NewRootCommand() *cobra.Command {
 			paramsQuery: paramsQuery,
 			fields:      strings.TrimSpace(flagFields),
 			fieldList:   output.SplitFieldMask(flagFields),
+			expand:      strings.TrimSpace(flagExpand),
 			dryRun:      flagDryRun,
 			schema:      schemaProvider,
 		}
@@ -266,6 +273,7 @@ func NewRootCommand() *cobra.Command {
 	root.PersistentFlags().DurationVar(&flagTimeout, "timeout", 30*time.Second, "HTTP timeout")
 	root.PersistentFlags().StringVar(&flagParams, "params", "", "Raw query params as JSON object")
 	root.PersistentFlags().StringVar(&flagFields, "fields", "", "Field mask / projection (comma-separated)")
+	root.PersistentFlags().StringVar(&flagExpand, "expand", "", "Expand related objects (comma-separated, e.g. user,project)")
 	root.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "Validate and print request plan without executing")
 
 	root.AddCommand(newAuthCommand())

@@ -10,6 +10,35 @@ type Identity struct {
 	Scopes         []PublicAPIScope `json:"scopes"`
 }
 
+// Expanded object types (included when ?expand= is used)
+
+type ExpandedUser struct {
+	ID    string  `json:"id"`
+	Name  *string `json:"name"`
+	Email string  `json:"email"`
+}
+
+type ExpandedClient struct {
+	ID          string `json:"id"`
+	CompanyName string `json:"companyName"`
+}
+
+type ExpandedProject struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+}
+
+type ExpandedCapability struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+type ExpandedTimeOffType struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type User struct {
 	ID                  string  `json:"id"`
 	OrganizationID      *string `json:"organizationId"`
@@ -25,6 +54,8 @@ type User struct {
 	UserType            string  `json:"userType"`
 	CreatedAt           string  `json:"createdAt"`
 	UpdatedAt           string  `json:"updatedAt"`
+	// Expand fields
+	ReportsTo *ExpandedUser `json:"reportsTo,omitempty"`
 }
 
 type UpdateUserInput struct {
@@ -50,6 +81,9 @@ type ClientResource struct {
 	UpdatedAt        string   `json:"updatedAt"`
 	Categories       []string `json:"categories"`
 	AccountManagerID *string  `json:"accountManagerId"`
+	// Expand fields
+	AccountManager *ExpandedUser `json:"accountManager,omitempty"`
+	CreatedByUser  *ExpandedUser `json:"createdByUser,omitempty"`
 }
 
 type CreateClientInput struct {
@@ -87,6 +121,9 @@ type Project struct {
 	Status           string  `json:"status"`
 	CreatedAt        string  `json:"createdAt"`
 	UpdatedAt        string  `json:"updatedAt"`
+	// Expand fields
+	Client         *ExpandedClient `json:"client,omitempty"`
+	ProjectManager *ExpandedUser   `json:"projectManager,omitempty"`
 }
 
 type CreateProjectInput struct {
@@ -121,6 +158,10 @@ type Assignment struct {
 	EffectiveHourRate *string `json:"effectiveHourlyRate"`
 	CreatedAt         string  `json:"createdAt"`
 	UpdatedAt         string  `json:"updatedAt"`
+	// Expand fields
+	User       *ExpandedUser       `json:"user,omitempty"`
+	Project    *ExpandedProject    `json:"project,omitempty"`
+	Capability *ExpandedCapability `json:"capability,omitempty"`
 }
 
 type AssignmentInput struct {
@@ -145,6 +186,10 @@ type ActualHour struct {
 	EffectiveHourRate *string `json:"effectiveHourlyRate"`
 	CreatedAt         string  `json:"createdAt"`
 	UpdatedAt         string  `json:"updatedAt"`
+	// Expand fields
+	User       *ExpandedUser       `json:"user,omitempty"`
+	Project    *ExpandedProject    `json:"project,omitempty"`
+	Capability *ExpandedCapability `json:"capability,omitempty"`
 }
 
 type ActualHourInput struct {
@@ -173,6 +218,10 @@ type TimeOffRequest struct {
 	ApprovedAt      *string `json:"approvedAt"`
 	CreatedAt       string  `json:"createdAt"`
 	UpdatedAt       string  `json:"updatedAt"`
+	// Expand fields
+	User        *ExpandedUser        `json:"user,omitempty"`
+	TimeOffType *ExpandedTimeOffType `json:"timeOffType,omitempty"`
+	ApprovedBy  *ExpandedUser        `json:"approvedBy,omitempty"`
 }
 
 type CreateTimeOffInput struct {
