@@ -100,33 +100,87 @@ func newActualHoursListCommand() *cobra.Command {
 
 func newActualHoursUpsertCommand() *cobra.Command {
 	var (
-		jsonBody string
-		payload  string
-		filePath string
+		jsonBody     string
+		payload      string
+		filePath     string
+		userID       string
+		projectID    string
+		date         string
+		hours        int
+		capabilityID string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "upsert",
-		Short: "Bulk upsert actual hours",
-		Long:  "Pass JSON via --body or --file. Accepts either {\"items\":[...]} or an array of items.",
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			payloadValue := payload
-			if payloadValue == "" {
-				payloadValue = jsonBody
-			}
+		Short: "Upsert actual hours",
+		Long: `Upsert actual hours via individual flags or bulk JSON.
 
+Single item:
+  supervisible actual-hours upsert --user-id UUID --project-id UUID --date 2026-03-06 --hours 5
+
+Bulk:
+  supervisible actual-hours upsert --payload '{"items":[...]}'
+  supervisible actual-hours upsert --file payload.json`,
+		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
 				return err
 			}
 
-			rawBody, err := inputs.ParsePayload(payloadValue, filePath)
-			if err != nil {
-				return err
+			var rawBody map[string]any
+
+			if userID != "" {
+				// Flag mode — single item
+				if payload != "" || jsonBody != "" || filePath != "" {
+					return fmt.Errorf("--user-id flag mode cannot be combined with --payload, --body, or --file")
+				}
+				if err := requireUUIDArg("user-id", userID); err != nil {
+					return err
+				}
+				if err := requireUUIDArg("project-id", projectID); err != nil {
+					return err
+				}
+				if projectID == "" {
+					return fmt.Errorf("--project-id is required when using --user-id")
+				}
+				if date == "" {
+					return fmt.Errorf("--date is required when using --user-id")
+				}
+				if err := validateOptionalDate("date", date); err != nil {
+					return err
+				}
+				if !cmd.Flags().Changed("hours") {
+					return fmt.Errorf("--hours is required when using --user-id")
+				}
+
+				item := map[string]any{
+					"userId":    userID,
+					"projectId": projectID,
+					"date":      date,
+					"hours":     hours,
+				}
+				if capabilityID != "" {
+					if err := requireUUIDArg("capability-id", capabilityID); err != nil {
+						return err
+					}
+					item["capabilityId"] = capabilityID
+				}
+				rawBody = map[string]any{"items": []any{item}}
+			} else {
+				// Bulk mode — existing payload/file behavior
+				payloadValue := payload
+				if payloadValue == "" {
+					payloadValue = jsonBody
+				}
+				rawBody, err = inputs.ParsePayload(payloadValue, filePath)
+				if err != nil {
+					return err
+				}
+				if len(rawBody) == 0 {
+					return fmt.Errorf("payload cannot be empty")
+				}
 			}
-			if len(rawBody) == 0 {
-				return fmt.Errorf("payload cannot be empty")
-			}
+
 			query := app.ResolvedQuery("POST", "/actual-hours", nil)
 			plan := RequestPlan{
 				CommandPath:   "actual-hours upsert",
@@ -162,6 +216,11 @@ func newActualHoursUpsertCommand() *cobra.Command {
 	cmd.Flags().StringVar(&jsonBody, "body", "", "JSON payload (deprecated: use --payload)")
 	cmd.Flags().StringVar(&payload, "payload", "", "JSON payload")
 	cmd.Flags().StringVar(&filePath, "file", "", "Path to JSON payload")
+	cmd.Flags().StringVar(&userID, "user-id", "", "User ID (single-item mode)")
+	cmd.Flags().StringVar(&projectID, "project-id", "", "Project ID (single-item mode)")
+	cmd.Flags().StringVar(&date, "date", "", "Date YYYY-MM-DD (single-item mode)")
+	cmd.Flags().IntVar(&hours, "hours", 0, "Hours (single-item mode)")
+	cmd.Flags().StringVar(&capabilityID, "capability-id", "", "Capability ID (optional, single-item mode)")
 	cmd.MarkFlagsMutuallyExclusive("payload", "file")
 	cmd.MarkFlagsMutuallyExclusive("body", "file")
 	return cmd

@@ -860,7 +860,7 @@
       },
       "post": {
         "summary": "Upsert user assignments",
-        "description": "Creates or updates assignment rows by unique key (user, project, capability, date).",
+        "description": "Creates or updates assignment rows by unique key (user, project, capability, date). Dates are automatically normalized to Sunday (start of week). When capabilityId is omitted, it is auto-resolved from existing data if the user has exactly one capability on the project. Returns 400 if the user has multiple capabilities and none is specified.",
         "tags": ["assignments"],
         "security": [
           {
@@ -1041,7 +1041,7 @@
       },
       "post": {
         "summary": "Upsert actual hours",
-        "description": "Creates or updates actual-hour rows by unique key (user, project, capability, date).",
+        "description": "Creates or updates actual-hour rows by unique key (user, project, capability, date). Dates are automatically normalized to Sunday (start of week). When capabilityId is omitted, it is auto-resolved from existing data if the user has exactly one capability on the project. Returns 400 if the user has multiple capabilities and none is specified.",
         "tags": ["actual-hours"],
         "security": [
           {
