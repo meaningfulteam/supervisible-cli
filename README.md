@@ -1,144 +1,168 @@
 # supervisible-cli
 
-`supervisible-cli` is the official command-line interface for the Supervisible Public API.
+[![CI](https://github.com/supervisible/supervisible-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/supervisible/supervisible-cli/actions/workflows/ci.yml)
+[![Go](https://img.shields.io/badge/go-1.24-blue)](https://go.dev)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Homebrew](https://img.shields.io/badge/homebrew-supervisible%2Ftap-orange)](https://github.com/supervisible/homebrew-tap)
 
-This project is implemented in Go and follows practical CLI patterns inspired by:
+The official Go CLI for the [Supervisible](https://supervisible.com) Public API.
 
-- [basecamp-cli](https://github.com/basecamp/basecamp-cli)
-- [gogcli](https://github.com/steipete/gogcli)
+---
 
-## Install
+## Features
 
-### Homebrew (tap)
+- **`--dry-run` safety** — validate and preview any mutating request before it executes
+- **`--json` for agents** — compact, parseable output on every command
+- **Schema introspection** — explore available endpoints and field shapes without leaving the terminal
+- **OS keyring auth** — API keys stored securely in the system keychain with plain-file fallback
+- **Multi-platform** — macOS, Linux, and Windows; ARM and AMD64
+
+---
+
+## Quickstart
 
 ```bash
+# Install
 brew tap supervisible/tap
 brew install supervisible
-```
 
-### Build from source
-
-```bash
-git clone https://github.com/supervisible/supervisible-cli.git
-cd supervisible-cli
-make build
-./bin/supervisible --help
-```
-
-## Authentication
-
-The CLI uses Supervisible API keys (`sv_live_...`) with Bearer auth.
-
-```bash
+# Authenticate
 supervisible auth login --api-key sv_live_xxx
-supervisible auth status --verify
-supervisible me
+
+# First command
+supervisible me --json
 ```
 
-You can also provide credentials via environment variables:
-
-- `SUPERVISIBLE_API_KEY`
-- `SUPERVISIBLE_BASE_URL` (host or full `/api/v1` URL)
-
-## Global flags
-
-- `--json, -j` JSON output
-- `--api-key` override API key for current command
-- `--base-url` override API base URL
-- `--timeout` HTTP timeout (default `30s`)
-- `--config` custom config file path
-- `--params '<json-object>'` raw query params merged into every request
-- `--fields 'id,name'` field mask / local projection
-- `--dry-run` validate and print request plan without executing mutating requests
-
-## New schema introspection
-
-- `supervisible schema endpoints --json`
-- `supervisible schema describe "GET /projects" --json`
-- `supervisible schema describe projects.get --json`
-
-Schema source defaults to embedded OpenAPI and supports overrides:
-
-- `SUPERVISIBLE_SCHEMA_URL`
-- `SUPERVISIBLE_SCHEMA_FILE`
+---
 
 ## Commands
 
 ### Core
 
-- `supervisible me`
-- `supervisible auth login|status|logout|token`
-- `supervisible config show|set-base-url`
-- `supervisible schema endpoints|describe`
+| Command | Description |
+|---------|-------------|
+| `supervisible me` | Show the authenticated user |
+| `supervisible auth login` | Store an API key |
+| `supervisible auth status [--verify]` | Check stored credentials |
+| `supervisible auth logout` | Remove stored credentials |
+| `supervisible auth token` | Print the raw token |
+| `supervisible config show` | Print resolved config |
+| `supervisible config set-base-url <url>` | Persist a custom base URL |
+| `supervisible schema endpoints` | List all API endpoints |
+| `supervisible schema describe <endpoint>` | Show request/response shape |
 
 ### Users
 
-- `supervisible users list [--limit --offset]`
-- `supervisible users update <user-id> [flags] [--payload|--file]`
+| Command | Description |
+|---------|-------------|
+| `supervisible users list [--limit --offset]` | List users |
+| `supervisible users update <user-id> [flags]` | Update a user |
 
 ### Clients
 
-- `supervisible clients list`
-- `supervisible clients create [flags] [--payload|--file]`
-- `supervisible clients update <client-id> [flags] [--payload|--file]`
+| Command | Description |
+|---------|-------------|
+| `supervisible clients list` | List clients |
+| `supervisible clients create [flags]` | Create a client |
+| `supervisible clients update <client-id> [flags]` | Update a client |
 
 ### Projects
 
-- `supervisible projects list`
-- `supervisible projects create [flags] [--payload|--file]`
-- `supervisible projects update <project-id> [flags] [--payload|--file]`
+| Command | Description |
+|---------|-------------|
+| `supervisible projects list` | List projects |
+| `supervisible projects create [flags]` | Create a project |
+| `supervisible projects update <project-id> [flags]` | Update a project |
 
 ### Assignments
 
-- `supervisible assignments list [filters]`
-- `supervisible assignments upsert --payload '{"items":[...]}'`
-- `supervisible assignments upsert --file payload.json`
-- `supervisible assignments upsert --body '{...}'` (deprecated alias)
+| Command | Description |
+|---------|-------------|
+| `supervisible assignments list [filters]` | List assignments |
+| `supervisible assignments upsert --payload '\{"items":[...]\}'` | Bulk upsert assignments |
+| `supervisible assignments upsert --file payload.json` | Bulk upsert from file |
 
 ### Actual Hours
 
-- `supervisible actual-hours list [filters]`
-- `supervisible actual-hours upsert --payload '{"items":[...]}'`
-- `supervisible actual-hours upsert --file payload.json`
-- `supervisible actual-hours upsert --body '{...}'` (deprecated alias)
+| Command | Description |
+|---------|-------------|
+| `supervisible actual-hours list [filters]` | List logged hours |
+| `supervisible actual-hours upsert --payload '\{"items":[...]\}'` | Bulk upsert hours |
+| `supervisible actual-hours upsert --file payload.json` | Bulk upsert from file |
 
 ### Time Off
 
-- `supervisible time-off list [filters]`
-- `supervisible time-off create [flags] [--payload|--file]`
-- `supervisible time-off update <request-id> [flags] [--payload|--file]`
-- `supervisible time-off delete <request-id>`
-- `supervisible time-off approve <request-id>`
-- `supervisible time-off reject <request-id> --reason "..." [--payload|--file]`
+| Command | Description |
+|---------|-------------|
+| `supervisible time-off list [filters]` | List time-off requests |
+| `supervisible time-off create [flags]` | Create a request |
+| `supervisible time-off update <request-id> [flags]` | Update a request |
+| `supervisible time-off delete <request-id>` | Delete a request |
+| `supervisible time-off approve <request-id>` | Approve a request |
+| `supervisible time-off reject <request-id> --reason "..."` | Reject a request |
 
-## Precedence rules
+---
 
-### Query precedence
+## Global Flags
 
-Final query is built as:
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--json`, `-j` | false | JSON output |
+| `--api-key` | | Override API key for this invocation |
+| `--base-url` | | Override API base URL |
+| `--timeout` | `30s` | HTTP request timeout |
+| `--config` | | Custom config file path |
+| `--params '<json>'` | | Raw query params merged into every request |
+| `--fields 'id,name'` | | Field mask / local projection |
+| `--dry-run` | false | Validate and print request plan; skip execution |
 
-1. Command-specific flags (e.g. `--limit`)
-2. `--fields` (when schema says operation supports `fields` query)
-3. `--params` overrides all overlaps (raw wins)
+---
 
-### Body precedence
+## Authentication
 
-For mutating commands:
+API keys (`sv_live_...`) can be set via:
 
-1. Build typed payload from command flags
-2. Merge `--payload` or `--file` on top (raw wins)
-3. Send merged payload
+1. `supervisible auth login --api-key sv_live_xxx` — stored in OS keyring
+2. `SUPERVISIBLE_API_KEY` environment variable
+3. `SUPERVISIBLE_BASE_URL` — override host or full `/api/v1` URL
 
-## Agent-safe usage examples
+---
+
+## Schema Introspection
 
 ```bash
-# List users with predictable, compact output
+supervisible schema endpoints --json
+supervisible schema describe "GET /projects" --json
+supervisible schema describe projects.get --json
+```
+
+Schema source defaults to the embedded OpenAPI spec. Override with:
+
+- `SUPERVISIBLE_SCHEMA_URL` — remote URL
+- `SUPERVISIBLE_SCHEMA_FILE` — local file path
+
+---
+
+## Precedence Rules
+
+**Query params**: command flags → `--fields` → `--params` (raw wins)
+
+**Request body**: typed flags → `--payload` / `--file` merge on top (raw wins)
+
+---
+
+## Agent-Safe Usage
+
+`--json` + `--dry-run` + `--fields` make the CLI safe and predictable for automation:
+
+```bash
+# Compact, filtered output
 supervisible users list \
   --params '{"limit":10}' \
   --fields 'id,name,email' \
   --json
 
-# Validate a write operation without executing
+# Preview a write without executing
 supervisible projects create \
   --name "Q2 Plan" \
   --client-id 019cb675-c4d6-7e90-8806-25e5145c3a06 \
@@ -149,35 +173,25 @@ supervisible projects create \
   --json
 ```
 
+---
+
+## Install from Source
+
+```bash
+git clone https://github.com/supervisible/supervisible-cli.git
+cd supervisible-cli
+make build
+./bin/supervisible --help
+```
+
+---
+
 ## Development
 
-```bash
-make tidy
-make fmt
-make test
-make build
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, testing, and PR guidelines.
 
-## Release and Homebrew
+---
 
-This repo includes a GoReleaser config (`.goreleaser.yaml`) with a Homebrew tap publish target.
+## License
 
-### Dry-run release
-
-```bash
-goreleaser release --snapshot --clean
-```
-
-### Publish
-
-Set `HOMEBREW_TAP_GITHUB_TOKEN` with write access to your tap repository and run:
-
-```bash
-goreleaser release
-```
-
-## Notes
-
-- Response parsing follows Supervisible's `{"data": ...}` envelope and API error envelope.
-- For secure token persistence, the CLI tries OS keyring first and falls back to local config storage.
-- Input validation rejects common agent failure patterns (query/hash in IDs, control chars, malformed UUID/date).
+MIT — see [LICENSE](LICENSE).

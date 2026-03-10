@@ -1,0 +1,68 @@
+name: Bug Report
+description: Report a bug or unexpected behaviour in supervisible-cli
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for taking the time to report a bug. Please fill in as much detail as possible.
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS / Architecture
+      options:
+        - macOS (Apple Silicon)
+        - macOS (Intel)
+        - Linux (amd64)
+        - Linux (arm64)
+        - Windows (amd64)
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: CLI Version
+      description: Output of `supervisible version`
+      placeholder: "v0.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: command
+    attributes:
+      label: Command Run
+      description: The exact command you ran (redact any secrets)
+      placeholder: "supervisible projects list --json"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Output
+      description: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Output
+      description: What actually happened? Include error messages and exit codes.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction Steps
+      description: Step-by-step instructions to reproduce the issue.
+      placeholder: |
+        1. Run `supervisible auth login --api-key sv_live_xxx`
+        2. Run `supervisible projects list --json`
+        3. Observe error
+    validations:
+      required: true

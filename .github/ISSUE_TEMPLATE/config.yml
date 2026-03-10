@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Supervisible Support
+    url: https://supervisible.com/support
+    about: For questions about the Supervisible API or your account, please reach out to support.
