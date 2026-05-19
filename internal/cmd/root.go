@@ -287,6 +287,10 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newTimeOffCommand())
 	root.AddCommand(newSchemaCommand())
 	root.AddCommand(newVersionCommand())
+	root.AddCommand(newCapacityCommand())
+	root.AddCommand(newBenchCommand())
+	root.AddCommand(newWhoisCommand())
+	root.AddCommand(newContextCommand())
 
 	return root
 }

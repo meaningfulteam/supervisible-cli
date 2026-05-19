@@ -101,6 +101,33 @@ supervisible me --json
 | `supervisible time-off approve <request-id>` | Approve a request |
 | `supervisible time-off reject <request-id> --reason "..."` | Reject a request |
 
+### Compound Commands
+
+These commands fetch from multiple API endpoints and compute derived insights in a single call — designed for agents and humans who need answers, not raw data.
+
+| Command | Description |
+|---------|-------------|
+| `supervisible capacity [--week YYYY-Www]` | Team capacity: assigned, available, and free hours per user |
+| `supervisible bench [--week YYYY-Www] [--min-hours 8]` | Who has free capacity? Filtered and sorted by availability |
+| `supervisible whois <name-or-email>` | Look up a person: projects, assignments, time-off |
+| `supervisible context` | Org summary (users, clients, projects) for agent bootstrap |
+
+The `--week` flag accepts ISO week format (`2026-W21`) or a date (`2026-05-18`). Defaults to the current week.
+
+```bash
+# Who has room for more work this week?
+supervisible bench --json
+
+# What's Juan working on?
+supervisible whois juan --json
+
+# Full team capacity for a specific week
+supervisible capacity --week 2026-W21
+
+# Agent bootstrap: get full org context
+supervisible context --json
+```
+
 ---
 
 ## Global Flags
