@@ -10,7 +10,15 @@ import (
 	"text/tabwriter"
 )
 
-// Printer handles CLI output formatting.
+// Printer is the CLI output boundary.
+//
+// Output contract:
+//
+//	stdout = data (JSON, tables, raw values that callers parse or display as a result)
+//	stderr = auxiliary (status, hints, dry-run previews, warnings, error messages)
+//
+// Tests rely on this. Don't add a method that violates it.
+// Convention: warning lines start with "warning: " (lowercase, no glyph).
 type Printer struct {
 	out      io.Writer
 	err      io.Writer
@@ -25,30 +33,39 @@ func (p *Printer) IsJSON() bool {
 	return p.jsonMode
 }
 
-func (p *Printer) Print(value any) error {
+// Stdout returns the configured stdout writer. Use for table headers and any
+// other content that is part of the human-readable data view.
+func (p *Printer) Stdout() io.Writer {
+	return p.out
+}
+
+// Stderr returns the configured stderr writer. Use for auxiliary output that
+// shouldn't pollute --json pipes.
+func (p *Printer) Stderr() io.Writer {
+	return p.err
+}
+
+// Data writes a value to stdout. JSON-encoded (with HTML escaping disabled)
+// when --json is set, otherwise the value's default %v rendering plus a
+// trailing newline. Use this for command results.
+func (p *Printer) Data(value any) error {
 	if p.jsonMode {
 		enc := json.NewEncoder(p.out)
 		enc.SetIndent("", "  ")
+		enc.SetEscapeHTML(false)
 		return enc.Encode(value)
 	}
 	_, err := fmt.Fprintf(p.out, "%v\n", value)
 	return err
 }
 
-func (p *Printer) PrintJSON(value any) error {
-	enc := json.NewEncoder(p.out)
-	enc.SetIndent("", "  ")
-	return enc.Encode(value)
-}
-
-func (p *Printer) PrintMessage(format string, args ...any) {
-	_, _ = fmt.Fprintf(p.out, format+"\n", args...)
-}
-
-func (p *Printer) PrintError(format string, args ...any) {
+// Aux writes auxiliary text to stderr (Printf semantics + newline).
+// Use this for status, hints, dry-run previews, warnings, "Updated: <id>" lines.
+func (p *Printer) Aux(format string, args ...any) {
 	_, _ = fmt.Fprintf(p.err, format+"\n", args...)
 }
 
+// Table writes a tab-aligned table to stdout. Part of the data view.
 func (p *Printer) Table(headers []string, rows [][]string) error {
 	tw := tabwriter.NewWriter(p.out, 0, 0, 2, ' ', 0)
 	if _, err := fmt.Fprintln(tw, strings.Join(headers, "\t")); err != nil {

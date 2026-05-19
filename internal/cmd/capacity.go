@@ -164,11 +164,14 @@ func newCapacityCommand() *cobra.Command {
 		Long: `Show assigned hours, available hours, and free capacity for all active team members.
 
 Fetches users, assignments, and approved time-off for the target week, then
-computes per-user capacity. Defaults to the current week.
-
-Examples:
+computes per-user capacity. Defaults to the current week.`,
+		Example: `  # Current week
   supervisible capacity
+
+  # Specific ISO week
   supervisible capacity --week 2026-W21
+
+  # JSON for agents
   supervisible capacity --week 2026-05-18 --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -262,7 +265,7 @@ func fetchCapacityData(cmd *cobra.Command, app *App, weekFlag string) (*Capacity
 }
 
 func printCapacityTable(p *output.Printer, report *CapacityReport, header string) error {
-	p.PrintMessage("Capacity — %s\n", header)
+	fmt.Fprintf(p.Stdout(), "Capacity — %s\n\n", header)
 
 	rows := make([][]string, 0, len(report.Users))
 	for _, u := range report.Users {

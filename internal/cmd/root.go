@@ -22,6 +22,7 @@ import (
 const (
 	envAPIKey  = "SUPERVISIBLE_API_KEY"
 	envBaseURL = "SUPERVISIBLE_BASE_URL"
+	envDebug   = "SUPERVISIBLE_DEBUG"
 )
 
 type contextKey string
@@ -37,6 +38,7 @@ type App struct {
 	apiKey      string
 	tokenSource string
 	timeout     time.Duration
+	verbose     bool
 	client      *api.Client
 	params      map[string]any
 	paramsQuery url.Values
@@ -87,7 +89,11 @@ func (a *App) RequireClient() (*api.Client, error) {
 		return a.client, nil
 	}
 
-	client, err := api.NewClient(a.baseURL, a.apiKey, a.timeout)
+	client, err := api.NewClientWithOptions(a.baseURL, a.apiKey, api.ClientOptions{
+		Timeout:  a.timeout,
+		Verbose:  a.verbose,
+		DebugOut: a.printer.Stderr(),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +136,7 @@ func (a *App) PrintData(value any) error {
 			projected = p
 		}
 	}
-	return a.printer.PrintJSON(projected)
+	return a.printer.Data(projected)
 }
 
 type RequestPlan struct {
@@ -149,21 +155,65 @@ func (a *App) MaybeDryRun(plan RequestPlan) bool {
 	}
 	plan.WillExecute = false
 	if a.printer.IsJSON() {
-		_ = a.printer.PrintJSON(plan)
+		_ = a.printer.Data(plan)
 	} else {
-		a.printer.PrintMessage("Dry-run: %s %s", plan.Method, plan.Endpoint)
+		a.printer.Aux("Dry-run: %s %s", plan.Method, plan.Endpoint)
 		if len(plan.Query) > 0 {
-			a.printer.PrintMessage("Query: %v", plan.Query)
+			a.printer.Aux("Query: %v", plan.Query)
 		}
 		if plan.Body != nil {
 			data, _ := json.MarshalIndent(plan.Body, "", "  ")
-			a.printer.PrintMessage("Body:\n%s", string(data))
+			a.printer.Aux("Body:\n%s", string(data))
 		}
 		if plan.RequiredScope != "" {
-			a.printer.PrintMessage("Required scope: %s", plan.RequiredScope)
+			a.printer.Aux("Required scope: %s", plan.RequiredScope)
 		}
 	}
 	return true
+}
+
+// ExecuteOpts is the per-call configuration for App.Execute.
+type ExecuteOpts struct {
+	CommandPath string     // e.g. "projects update"
+	Method      string     // http.MethodGet, etc.
+	Endpoint    string     // schema endpoint pattern, e.g. "/users/{user_id}"
+	Path        string     // actual request path, e.g. "/users/abc-123" (defaults to Endpoint if empty)
+	Query       url.Values // base query before ResolvedQuery merges --fields/--expand/--params
+	Body        any        // request body (nil for GETs)
+	Out         any        // pointer for JSON decode; nil if caller renders nothing on success
+}
+
+// Execute runs the standard "resolve query → dry-run → require client → call API" flow.
+// Returns (executed bool, err error): executed=false means dry-run printed the plan;
+// caller skips rendering. Compound commands that orchestrate multiple HTTP calls
+// should keep using ResolvedQuery + client.Do directly.
+func (a *App) Execute(ctx context.Context, opts ExecuteOpts) (bool, error) {
+	path := opts.Path
+	if path == "" {
+		path = opts.Endpoint
+	}
+
+	query := a.ResolvedQuery(opts.Method, opts.Endpoint, opts.Query)
+	plan := RequestPlan{
+		CommandPath:   opts.CommandPath,
+		Method:        opts.Method,
+		Endpoint:      path,
+		Query:         query,
+		Body:          opts.Body,
+		RequiredScope: a.RequiredScope(opts.Method, opts.Endpoint),
+	}
+	if a.MaybeDryRun(plan) {
+		return false, nil
+	}
+
+	client, err := a.RequireClient()
+	if err != nil {
+		return false, err
+	}
+	if err := client.Do(ctx, opts.Method, path, query, opts.Body, opts.Out); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func withApp(ctx context.Context, app *App) context.Context {
@@ -199,6 +249,7 @@ func NewRootCommand() *cobra.Command {
 		flagFields     string
 		flagExpand     string
 		flagDryRun     bool
+		flagVerbose    bool
 	)
 
 	root := &cobra.Command{
@@ -253,6 +304,7 @@ func NewRootCommand() *cobra.Command {
 			apiKey:      resolvedAPIKey,
 			tokenSource: source,
 			timeout:     flagTimeout,
+			verbose:     flagVerbose || envTruthy(os.Getenv(envDebug)),
 			params:      paramsObj,
 			paramsQuery: paramsQuery,
 			fields:      strings.TrimSpace(flagFields),
@@ -275,6 +327,7 @@ func NewRootCommand() *cobra.Command {
 	root.PersistentFlags().StringVar(&flagFields, "fields", "", "Field mask / projection (comma-separated)")
 	root.PersistentFlags().StringVar(&flagExpand, "expand", "", "Expand related objects (comma-separated, e.g. user,project)")
 	root.PersistentFlags().BoolVar(&flagDryRun, "dry-run", false, "Validate and print request plan without executing")
+	root.PersistentFlags().BoolVar(&flagVerbose, "verbose", false, "Dump HTTP requests and responses to stderr (also via SUPERVISIBLE_DEBUG=1)")
 
 	root.AddCommand(newAuthCommand())
 	root.AddCommand(newConfigCommand())
@@ -332,6 +385,14 @@ func resolveBaseURL(flagValue, envValue, configValue string) (string, error) {
 		candidate = config.DefaultBaseURL
 	}
 	return api.NormalizeBaseURL(candidate)
+}
+
+func envTruthy(value string) bool {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on":
+		return true
+	}
+	return false
 }
 
 func resolveAPIKey(store *config.Store, baseURL, flagValue, envValue string) (string, string, error) {

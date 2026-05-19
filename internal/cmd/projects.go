@@ -33,12 +33,13 @@ func newProjectsListCommand() *cobra.Command {
 		Use:   "list",
 		Short: "List projects",
 		Args:  cobra.NoArgs,
+		Example: `  # List projects
+  supervisible projects list
+
+  # Paginate and project specific fields
+  supervisible projects list --limit 50 --fields id,name,status --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
-			if err != nil {
-				return err
-			}
-			client, err := app.RequireClient()
 			if err != nil {
 				return err
 			}
@@ -46,12 +47,20 @@ func newProjectsListCommand() *cobra.Command {
 			baseQuery := url.Values{}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
-			query := app.ResolvedQuery("GET", "/projects", baseQuery)
 
 			var projects []api.Project
-			err = client.Do(cmd.Context(), "GET", "/projects", query, nil, &projects)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "projects list",
+				Method:      "GET",
+				Endpoint:    "/projects",
+				Query:       baseQuery,
+				Out:         &projects,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
@@ -98,6 +107,12 @@ func newProjectsCreateCommand() *cobra.Command {
 		Use:   "create",
 		Short: "Create a project",
 		Args:  cobra.NoArgs,
+		Example: `  # Minimum required fields
+  supervisible projects create --name "Acme Website" --client-id <client-uuid> \
+    --start-date 2026-06-01 --end-date 2026-08-31
+
+  # Create from a JSON file
+  supervisible projects create --file project.json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(name) == "" || strings.TrimSpace(clientID) == "" || strings.TrimSpace(startDate) == "" || strings.TrimSpace(endDate) == "" {
 				return fmt.Errorf("--name, --client-id, --start-date and --end-date are required")
@@ -125,56 +140,48 @@ func newProjectsCreateCommand() *cobra.Command {
 			}
 
 			if cmd.Flags().Changed("objective") {
-				input.Objective = stringPtr(objective)
+				input.Objective = ptr(objective)
 			}
 			if cmd.Flags().Changed("project-manager-id") {
-				input.ProjectManagerID = stringPtr(projectManagerID)
+				input.ProjectManagerID = ptr(projectManagerID)
 			}
 			if cmd.Flags().Changed("status") {
-				input.Status = stringPtr(status)
+				input.Status = ptr(status)
 			}
 			if cmd.Flags().Changed("billing-type") {
-				input.BillingType = stringPtr(billingType)
+				input.BillingType = ptr(billingType)
 			}
 			if cmd.Flags().Changed("amount") {
-				input.Amount = float64Ptr(amount)
+				input.Amount = ptr(amount)
 			}
 			if cmd.Flags().Changed("hourly-rate") {
-				input.HourlyRate = float64Ptr(hourlyRate)
+				input.HourlyRate = ptr(hourlyRate)
 			}
 
 			body, err := mergePayloadWithStruct(payload, filePath, input)
 			if err != nil {
 				return err
 			}
-			query := app.ResolvedQuery("POST", "/projects", nil)
-			plan := RequestPlan{
-				CommandPath:   "projects create",
-				Method:        "POST",
-				Endpoint:      "/projects",
-				Query:         query,
-				Body:          body,
-				RequiredScope: app.RequiredScope("POST", "/projects"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
 
 			var created api.Project
-			err = client.Do(cmd.Context(), "POST", "/projects", query, body, &created)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "projects create",
+				Method:      "POST",
+				Endpoint:    "/projects",
+				Body:        body,
+				Out:         &created,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 			if app.Printer().IsJSON() {
 				return app.PrintData(created)
 			}
-			app.Printer().PrintMessage("Created project: %s", created.ID)
-			app.Printer().PrintMessage("Name: %s", created.Name)
+			app.Printer().Aux("Created project: %s", created.ID)
+			app.Printer().Aux("Name: %s", created.Name)
 			return nil
 		},
 	}
@@ -210,7 +217,12 @@ func newProjectsUpdateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update <project-id>",
 		Short: "Update a project",
-		Args:  cobra.ExactArgs(1),
+		Args:  argsWithUsage(cobra.ExactArgs(1)),
+		Example: `  # Mark a project completed
+  supervisible projects update 019e1cde-... --status completed
+
+  # Update via JSON payload
+  supervisible projects update 019e1cde-... --body '{"endDate":"2026-12-31"}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -224,33 +236,33 @@ func newProjectsUpdateCommand() *cobra.Command {
 			changed := false
 
 			if cmd.Flags().Changed("name") {
-				input.Name = stringPtr(name)
+				input.Name = ptr(name)
 				changed = true
 			}
 			if cmd.Flags().Changed("objective") {
-				input.Objective = stringPtr(objective)
+				input.Objective = ptr(objective)
 				changed = true
 			}
 			if cmd.Flags().Changed("start-date") {
 				if err := validateOptionalDate("start-date", startDate); err != nil {
 					return err
 				}
-				input.StartDate = stringPtr(startDate)
+				input.StartDate = ptr(startDate)
 				changed = true
 			}
 			if cmd.Flags().Changed("end-date") {
 				if err := validateOptionalDate("end-date", endDate); err != nil {
 					return err
 				}
-				input.EndDate = stringPtr(endDate)
+				input.EndDate = ptr(endDate)
 				changed = true
 			}
 			if cmd.Flags().Changed("project-manager-id") {
-				input.ProjectManagerID = stringPtr(projectManagerID)
+				input.ProjectManagerID = ptr(projectManagerID)
 				changed = true
 			}
 			if cmd.Flags().Changed("status") {
-				input.Status = stringPtr(status)
+				input.Status = ptr(status)
 				changed = true
 			}
 
@@ -262,36 +274,29 @@ func newProjectsUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			query := app.ResolvedQuery("PATCH", "/projects/{project_id}", nil)
-			plan := RequestPlan{
-				CommandPath:   "projects update",
-				Method:        "PATCH",
-				Endpoint:      "/projects/" + args[0],
-				Query:         query,
-				Body:          body,
-				RequiredScope: app.RequiredScope("PATCH", "/projects/{project_id}"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
 
 			var updated api.Project
-			err = client.Do(cmd.Context(), "PATCH", "/projects/"+args[0], query, body, &updated)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "projects update",
+				Method:      "PATCH",
+				Endpoint:    "/projects/{project_id}",
+				Path:        "/projects/" + args[0],
+				Body:        body,
+				Out:         &updated,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(updated)
 			}
-			app.Printer().PrintMessage("Updated project: %s", updated.ID)
-			app.Printer().PrintMessage("Name: %s", updated.Name)
-			app.Printer().PrintMessage("Status: %s", updated.Status)
+			app.Printer().Aux("Updated project: %s", updated.ID)
+			app.Printer().Aux("Name: %s", updated.Name)
+			app.Printer().Aux("Status: %s", updated.Status)
 			return nil
 		},
 	}

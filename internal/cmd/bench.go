@@ -19,11 +19,14 @@ func newBenchCommand() *cobra.Command {
 		Long: `Show team members who have free hours above a threshold for a given week.
 
 Same data as 'capacity', but filtered to users with freeHours >= --min-hours
-and sorted by most free hours first.
-
-Examples:
+and sorted by most free hours first.`,
+		Example: `  # Current-week bench
   supervisible bench
+
+  # Specific week, higher threshold
   supervisible bench --week 2026-W21 --min-hours 16
+
+  # JSON
   supervisible bench --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -57,8 +60,9 @@ Examples:
 			}
 
 			if len(filtered) == 0 {
-				app.Printer().PrintMessage("Bench — %s\n", header)
-				app.Printer().PrintMessage("No team members with >= %dh free capacity.", minHours)
+				w := app.Printer().Stdout()
+				fmt.Fprintf(w, "Bench — %s\n\n", header)
+				fmt.Fprintf(w, "No team members with >= %dh free capacity.\n", minHours)
 				return nil
 			}
 

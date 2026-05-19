@@ -31,12 +31,13 @@ func newUsersListCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List users",
+		Example: `  # List active users
+  supervisible users list
+
+  # Page through results, JSON for agents
+  supervisible users list --limit 50 --offset 0 --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
-			if err != nil {
-				return err
-			}
-			client, err := app.RequireClient()
 			if err != nil {
 				return err
 			}
@@ -44,12 +45,20 @@ func newUsersListCommand() *cobra.Command {
 			baseQuery := url.Values{}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
-			query := app.ResolvedQuery("GET", "/users", baseQuery)
 
 			var users []api.User
-			err = client.Do(cmd.Context(), "GET", "/users", query, nil, &users)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "users list",
+				Method:      "GET",
+				Endpoint:    "/users",
+				Query:       baseQuery,
+				Out:         &users,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
@@ -90,7 +99,12 @@ func newUsersUpdateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update <user-id>",
 		Short: "Update a user",
-		Args:  cobra.ExactArgs(1),
+		Args:  argsWithUsage(cobra.ExactArgs(1)),
+		Example: `  # Update individual fields via flags
+  supervisible users update 019404f3-... --name "Jane Doe"
+
+  # Update via JSON payload (advanced)
+  supervisible users update 019404f3-... --body '{"defaultAvailability":32}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -104,23 +118,23 @@ func newUsersUpdateCommand() *cobra.Command {
 			changed := false
 
 			if cmd.Flags().Changed("name") {
-				input.Name = stringPtr(name)
+				input.Name = ptr(name)
 				changed = true
 			}
 			if cmd.Flags().Changed("image") {
-				input.Image = stringPtr(image)
+				input.Image = ptr(image)
 				changed = true
 			}
 			if cmd.Flags().Changed("country-code") {
-				input.CountryCode = stringPtr(countryCode)
+				input.CountryCode = ptr(countryCode)
 				changed = true
 			}
 			if cmd.Flags().Changed("default-availability") {
-				input.DefaultAvailability = intPtr(defaultAvailability)
+				input.DefaultAvailability = ptr(defaultAvailability)
 				changed = true
 			}
 			if cmd.Flags().Changed("reports-to-id") {
-				input.ReportsToID = stringPtr(reportsToID)
+				input.ReportsToID = ptr(reportsToID)
 				changed = true
 			}
 
@@ -133,37 +147,29 @@ func newUsersUpdateCommand() *cobra.Command {
 				return err
 			}
 
-			query := app.ResolvedQuery("PATCH", "/users/{user_id}", nil)
-			plan := RequestPlan{
-				CommandPath:   "users update",
-				Method:        "PATCH",
-				Endpoint:      "/users/" + args[0],
-				Query:         query,
-				Body:          body,
-				RequiredScope: app.RequiredScope("PATCH", "/users/{user_id}"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
-
 			var user api.User
-			err = client.Do(cmd.Context(), "PATCH", "/users/"+args[0], query, body, &user)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "users update",
+				Method:      "PATCH",
+				Endpoint:    "/users/{user_id}",
+				Path:        "/users/" + args[0],
+				Body:        body,
+				Out:         &user,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(user)
 			}
 
-			app.Printer().PrintMessage("Updated user: %s", user.ID)
-			app.Printer().PrintMessage("Name: %s", output.CoalesceString(user.Name))
-			app.Printer().PrintMessage("Email: %s", user.Email)
+			app.Printer().Aux("Updated user: %s", user.ID)
+			app.Printer().Aux("Name: %s", output.CoalesceString(user.Name))
+			app.Printer().Aux("Email: %s", user.Email)
 			return nil
 		},
 	}

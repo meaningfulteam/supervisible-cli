@@ -49,13 +49,13 @@ func TestActualHoursDeletePrintsMessageOnSuccess(t *testing.T) {
 	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
 	t.Setenv("SUPERVISIBLE_BASE_URL", server.URL)
 
-	stdout, _, err := executeCLI(t, "--config", testConfigPath(t), "actual-hours", "delete", testActualHourID)
+	_, stderr, err := executeCLI(t, "--config", testConfigPath(t), "actual-hours", "delete", testActualHourID)
 	if err != nil {
 		t.Fatalf("command failed: %v", err)
 	}
 
-	if !strings.Contains(stdout, testActualHourID) {
-		t.Fatalf("expected output to contain ID %q, got: %q", testActualHourID, stdout)
+	if !strings.Contains(stderr, testActualHourID) {
+		t.Fatalf("expected stderr to contain ID %q, got: %q", testActualHourID, stderr)
 	}
 }
 

@@ -53,12 +53,13 @@ func newWhoisCommand() *cobra.Command {
 		Long: `Resolve a team member and show their current assignments and upcoming time-off.
 
 Matches by case-insensitive substring on name, or exact match on email
-(if the input contains @).
-
-Examples:
+(if the input contains @).`,
+		Example: `  # Substring on name
   supervisible whois juan
+
+  # Exact email match
   supervisible whois juan@m8l.com --json`,
-		Args: cobra.ExactArgs(1),
+		Args: argsWithUsage(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -241,17 +242,17 @@ func buildWhoisReport(user api.User, assignments []api.Assignment, timeOff []api
 }
 
 func printWhoisProfile(p *output.Printer, report WhoisReport, isoWeek, isoYear int, weekStart, weekEnd time.Time) error {
-	p.PrintMessage("%s (%s)\n", report.User.Name, report.User.Email)
+	w := p.Stdout()
+	fmt.Fprintf(w, "%s (%s)\n\n", report.User.Name, report.User.Email)
 
 	header := formatWeekHeader(isoWeek, isoYear, weekStart, weekEnd)
-	p.PrintMessage("This Week — %s", header)
-	p.PrintMessage("  Assigned: %dh / %dh available (%dh free)",
+	fmt.Fprintf(w, "This Week — %s\n", header)
+	fmt.Fprintf(w, "  Assigned: %dh / %dh available (%dh free)\n",
 		report.WeekSummary.AssignedHours,
 		report.WeekSummary.AvailableHours,
 		report.WeekSummary.FreeHours)
 
 	if len(report.Assignments) > 0 {
-		// Aggregate by project for display
 		projectMap := make(map[string]int)
 		for _, a := range report.Assignments {
 			projectMap[a.Project] += a.Hours
@@ -260,17 +261,17 @@ func printWhoisProfile(p *output.Printer, report WhoisReport, isoWeek, isoYear i
 		for name, hours := range projectMap {
 			parts = append(parts, fmt.Sprintf("%s (%dh)", name, hours))
 		}
-		p.PrintMessage("  Projects: %s", strings.Join(parts, ", "))
+		fmt.Fprintf(w, "  Projects: %s\n", strings.Join(parts, ", "))
 	}
 
-	p.PrintMessage("")
+	fmt.Fprintln(w)
 	if len(report.TimeOff) > 0 {
-		p.PrintMessage("Upcoming Time Off")
+		fmt.Fprintln(w, "Upcoming Time Off")
 		for _, to := range report.TimeOff {
-			p.PrintMessage("  %s: %s to %s (%s)", to.Type, to.StartDate, to.EndDate, to.Status)
+			fmt.Fprintf(w, "  %s: %s to %s (%s)\n", to.Type, to.StartDate, to.EndDate, to.Status)
 		}
 	} else {
-		p.PrintMessage("Upcoming Time Off: None")
+		fmt.Fprintln(w, "Upcoming Time Off: None")
 	}
 
 	return nil
