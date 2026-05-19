@@ -7,29 +7,29 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
+
 	"github.com/supervisible/supervisible-cli/internal/inputs"
 	"github.com/supervisible/supervisible-cli/internal/validate"
 )
 
-func stringPtr(v string) *string {
-	copy := v
-	return &copy
+// argsWithUsage wraps a cobra arg validator so that on validation failure the
+// command's usage block (which includes Example:) is printed to stderr before
+// the error returns. Use this on every leaf command that takes positional args.
+func argsWithUsage(validator cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := validator(cmd, args); err != nil {
+			_ = cmd.Usage()
+			return err
+		}
+		return nil
+	}
 }
 
-func intPtr(v int) *int {
-	copy := v
-	return &copy
-}
-
-func float64Ptr(v float64) *float64 {
-	copy := v
-	return &copy
-}
-
-func boolPtr(v bool) *bool {
-	copy := v
-	return &copy
-}
+// ptr returns a pointer to v. Use for building optional input structs:
+//
+//	input.Foo = ptr(foo)
+func ptr[T any](v T) *T { return &v }
 
 func splitCSV(raw string) []string {
 	trimmed := strings.TrimSpace(raw)
