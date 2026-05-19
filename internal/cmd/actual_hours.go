@@ -20,6 +20,7 @@ func newActualHoursCommand() *cobra.Command {
 	cmd.AddCommand(
 		newActualHoursListCommand(),
 		newActualHoursUpsertCommand(),
+		newActualHoursDeleteCommand(),
 	)
 
 	return cmd
@@ -208,8 +209,17 @@ Bulk:
 			if app.Printer().IsJSON() {
 				return app.PrintData(items)
 			}
-			app.Printer().PrintMessage("Upserted %d actual-hour row(s)", len(items))
-			return nil
+			rows := make([][]string, 0, len(items))
+			for _, item := range items {
+				rows = append(rows, []string{
+					item.ID,
+					item.UserID,
+					item.ProjectID,
+					item.Date,
+					fmt.Sprintf("%d", item.Hours),
+				})
+			}
+			return app.Printer().Table([]string{"ID", "USER_ID", "PROJECT_ID", "DATE", "HOURS"}, rows)
 		},
 	}
 
@@ -224,4 +234,47 @@ Bulk:
 	cmd.MarkFlagsMutuallyExclusive("payload", "file")
 	cmd.MarkFlagsMutuallyExclusive("body", "file")
 	return cmd
+}
+
+func newActualHoursDeleteCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <id>",
+		Short: "Delete an actual hour entry",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := appFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			if err := requireUUIDArg("id", args[0]); err != nil {
+				return err
+			}
+
+			query := app.ResolvedQuery("DELETE", "/actual-hours/{actual_hour_id}", nil)
+			plan := RequestPlan{
+				CommandPath:   "actual-hours delete",
+				Method:        "DELETE",
+				Endpoint:      "/actual-hours/" + args[0],
+				Query:         query,
+				RequiredScope: app.RequiredScope("DELETE", "/actual-hours/{actual_hour_id}"),
+			}
+			if app.MaybeDryRun(plan) {
+				return nil
+			}
+
+			client, err := app.RequireClient()
+			if err != nil {
+				return err
+			}
+
+			if err := client.DeleteActualHour(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			if app.Printer().IsJSON() {
+				return app.PrintData(map[string]string{"id": args[0]})
+			}
+			app.Printer().PrintMessage("Deleted actual-hour: %s", args[0])
+			return nil
+		},
+	}
 }

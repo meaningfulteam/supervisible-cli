@@ -363,6 +363,14 @@ func (c *Client) UpsertActualHours(ctx context.Context, input ActualHourUpsertIn
 	return out, nil
 }
 
+func (c *Client) DeleteActualHour(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodDelete, "/actual-hours/"+id, nil, nil, nil)
+}
+
+func (c *Client) DeleteAssignment(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodDelete, "/assignments/"+id, nil, nil, nil)
+}
+
 type TimeOffFilters struct {
 	UserID    string
 	Status    string

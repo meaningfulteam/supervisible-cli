@@ -20,6 +20,7 @@ func newAssignmentsCommand() *cobra.Command {
 	cmd.AddCommand(
 		newAssignmentsListCommand(),
 		newAssignmentsUpsertCommand(),
+		newAssignmentsDeleteCommand(),
 	)
 
 	return cmd
@@ -208,8 +209,17 @@ Bulk:
 			if app.Printer().IsJSON() {
 				return app.PrintData(items)
 			}
-			app.Printer().PrintMessage("Upserted %d assignment(s)", len(items))
-			return nil
+			rows := make([][]string, 0, len(items))
+			for _, item := range items {
+				rows = append(rows, []string{
+					item.ID,
+					item.UserID,
+					item.ProjectID,
+					item.Date,
+					fmt.Sprintf("%d", item.Hours),
+				})
+			}
+			return app.Printer().Table([]string{"ID", "USER_ID", "PROJECT_ID", "DATE", "HOURS"}, rows)
 		},
 	}
 
@@ -224,4 +234,47 @@ Bulk:
 	cmd.MarkFlagsMutuallyExclusive("payload", "file")
 	cmd.MarkFlagsMutuallyExclusive("body", "file")
 	return cmd
+}
+
+func newAssignmentsDeleteCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <id>",
+		Short: "Delete an assignment",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := appFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			if err := requireUUIDArg("id", args[0]); err != nil {
+				return err
+			}
+
+			query := app.ResolvedQuery("DELETE", "/assignments/{assignment_id}", nil)
+			plan := RequestPlan{
+				CommandPath:   "assignments delete",
+				Method:        "DELETE",
+				Endpoint:      "/assignments/" + args[0],
+				Query:         query,
+				RequiredScope: app.RequiredScope("DELETE", "/assignments/{assignment_id}"),
+			}
+			if app.MaybeDryRun(plan) {
+				return nil
+			}
+
+			client, err := app.RequireClient()
+			if err != nil {
+				return err
+			}
+
+			if err := client.DeleteAssignment(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			if app.Printer().IsJSON() {
+				return app.PrintData(map[string]string{"id": args[0]})
+			}
+			app.Printer().PrintMessage("Deleted assignment: %s", args[0])
+			return nil
+		},
+	}
 }
