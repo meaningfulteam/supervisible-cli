@@ -86,6 +86,32 @@ func (p *Provider) SupportsQueryParam(method, path, name string) bool {
 	return false
 }
 
+// KnownQueryParams returns the query parameter names declared in the schema for
+// (method, path), sorted alphabetically. Returns nil if the operation is unknown.
+func (p *Provider) KnownQueryParams(method, path string) []string {
+	op, ok := p.Lookup(method, path)
+	if !ok {
+		return nil
+	}
+	var out []string
+	for _, param := range op.Parameters {
+		if !strings.EqualFold(param.In, "query") {
+			continue
+		}
+		out = append(out, param.Name)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	// Sorted for stable warning output.
+	for i := 1; i < len(out); i++ {
+		for j := i; j > 0 && out[j-1] > out[j]; j-- {
+			out[j-1], out[j] = out[j], out[j-1]
+		}
+	}
+	return out
+}
+
 func (p *Provider) RequiredScope(method, path string) string {
 	op, ok := p.Lookup(method, path)
 	if !ok {

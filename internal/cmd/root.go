@@ -31,22 +31,23 @@ const appContextKey contextKey = "app"
 
 // App holds command runtime state.
 type App struct {
-	store       *config.Store
-	cfg         config.Config
-	printer     *output.Printer
-	baseURL     string
-	apiKey      string
-	tokenSource string
-	timeout     time.Duration
-	verbose     bool
-	client      *api.Client
-	params      map[string]any
-	paramsQuery url.Values
-	fields      string
-	fieldList   []string
-	expand      string
-	dryRun      bool
-	schema      *schema.Provider
+	store        *config.Store
+	cfg          config.Config
+	printer      *output.Printer
+	baseURL      string
+	apiKey       string
+	tokenSource  string
+	timeout      time.Duration
+	verbose      bool
+	client       *api.Client
+	params       map[string]any
+	paramsQuery  url.Values
+	paramsWarned bool
+	fields       string
+	fieldList    []string
+	expand       string
+	dryRun       bool
+	schema       *schema.Provider
 }
 
 func (a *App) Printer() *output.Printer {
@@ -112,6 +113,8 @@ func (a *App) ResolvedQuery(method, endpoint string, base url.Values) url.Values
 		out.Set("expand", a.expand)
 	}
 
+	a.warnUnknownParamKeys(method, endpoint)
+
 	for key, values := range a.paramsQuery {
 		for _, value := range values {
 			out.Set(key, value)
@@ -119,6 +122,31 @@ func (a *App) ResolvedQuery(method, endpoint string, base url.Values) url.Values
 	}
 
 	return out
+}
+
+// warnUnknownParamKeys emits one stderr warning per --params key that isn't in the
+// schema's declared query params for (method, endpoint). Non-blocking; the server
+// is still the source of truth. Silent when no schema is loaded or the endpoint
+// isn't declared (common for generic / synthetic paths).
+func (a *App) warnUnknownParamKeys(method, endpoint string) {
+	if a.schema == nil || a.paramsWarned || len(a.paramsQuery) == 0 {
+		return
+	}
+	known := a.schema.KnownQueryParams(method, endpoint)
+	if len(known) == 0 {
+		return
+	}
+	allowed := make(map[string]struct{}, len(known))
+	for _, k := range known {
+		allowed[strings.ToLower(k)] = struct{}{}
+	}
+	for key := range a.paramsQuery {
+		if _, ok := allowed[strings.ToLower(key)]; ok {
+			continue
+		}
+		a.printer.Aux("warning: unknown query param %q for %s %s (allowed: %s)", key, method, endpoint, strings.Join(known, ", "))
+	}
+	a.paramsWarned = true
 }
 
 func (a *App) RequiredScope(method, endpoint string) string {
