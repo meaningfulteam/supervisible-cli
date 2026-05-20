@@ -1,7 +1,7 @@
 ---
 plan: .thoughts/plans/2026-05-19-feat-cli-agent-experience.md
 ticket: none
-status: ready-for-review
+status: implemented
 ---
 
 # Implementation Notes: feat(cli) Agent-grade CLI
@@ -28,3 +28,22 @@ status: ready-for-review
 ### Open questions
 
 - **Should `App.Execute` accept a `cobra.Command` rather than a `context.Context`?** Currently every caller passes `cmd.Context()` and `cmd.Context()` could be derived once inside. Leaving as-is because callers might want a different context (e.g. for tests). Worth revisiting if the call sites all look identical for a while.
+
+## Session 2026-05-20
+
+### Design decisions (Phase 2)
+
+- **`assignments add` requires `--auto-capability=true` (default) or an explicit `--capability-id`.** Refused to silently pick a capability if neither is set, because that's the bug Phase 2 exists to fix. Plan said "default-on for `add`" and we kept that — but the resolver still fails loudly when no history exists, so the command never writes blindly.
+- **Auto-capability resolver caches per *invocation*, not globally.** A new `capabilityResolver` instance per command run. Two callers (`fillAutoCapability` for `upsert`, the inline call in `add`) each construct their own. Acceptable: a single bulk upsert resolves each unique (user, project) once, and there's no cross-command sharing to worry about.
+- **Time-off pre-flight aggregates per *time-off entry*, not per item.** A 5-item upsert that all land inside the same Sabbatical window prints one warning, not five. Used `warned[to.ID]` dedup. Plan called this out explicitly to avoid spam.
+- **`assignments add` refuses `new == 0` when the row already exists.** Until the server supports `DELETE /assignments/{id}` with `hours:0` semantics, writing 0 creates a zombie row that `whois` (Unit 7) then filters out. Better to fail loudly with "use `assignments delete` instead" than create a row the consumer then has to ignore.
+- **Pre-flight `--expand=timeOffType,user` is hardcoded.** The warning needs human-readable names; relying on `--params` would force every caller to remember. Cheap extra field on the GET.
+
+### Tradeoffs
+
+- **TOCTOU race on `assignments add`.** Documented in command `Long:`. Two concurrent `add` calls can both read 2h, both compute 4h, both write 4h — the second write wins, losing 2h of intent. Acceptable for a single-actor CLI; a real fix needs server-side diff semantics (PATCH with conditional updates), which is on the Phase 2 "What we're NOT doing" list.
+- **Pre-flight makes dry-run slower by one `/time-off` request per distinct user.** Bounded; for a 50-item single-user bulk, exactly one extra GET. The plan called this the right trade-off and the tests verify zero calls in non-dry-run mode.
+
+### Open questions
+
+- **Should `assignments add` emit a soft warning when computed hours equal the existing value (no-op write)?** Currently writes anyway. Edge case; worth revisiting if it shows up in real use.
