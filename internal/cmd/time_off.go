@@ -42,12 +42,14 @@ func newTimeOffListCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List time off requests",
+		Example: `  # Approved time-off for a user this quarter
+  supervisible time-off list --user-id <uuid> --status approved \
+    --start-date 2026-04-01 --end-date 2026-06-30 --json
+
+  # Pending requests for review
+  supervisible time-off list --status pending`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
-			if err != nil {
-				return err
-			}
-			client, err := app.RequireClient()
 			if err != nil {
 				return err
 			}
@@ -67,12 +69,20 @@ func newTimeOffListCommand() *cobra.Command {
 			}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
-			query := app.ResolvedQuery("GET", "/time-off", baseQuery)
 
 			var items []api.TimeOffRequest
-			err = client.Do(cmd.Context(), "GET", "/time-off", query, nil, &items)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "time-off list",
+				Method:      "GET",
+				Endpoint:    "/time-off",
+				Query:       baseQuery,
+				Out:         &items,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
@@ -119,6 +129,11 @@ func newTimeOffCreateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a time off request",
+		Example: `  # Create vacation request
+  supervisible time-off create \
+    --user-id <uuid> --time-off-type-id <uuid> \
+    --start-date 2026-07-15 --end-date 2026-07-19 \
+    --reason "Family trip"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(userID) == "" || strings.TrimSpace(timeOffTypeID) == "" || strings.TrimSpace(startDate) == "" || strings.TrimSpace(endDate) == "" || strings.TrimSpace(reason) == "" {
 				return fmt.Errorf("--user-id, --time-off-type-id, --start-date, --end-date and --reason are required")
@@ -150,41 +165,33 @@ func newTimeOffCreateCommand() *cobra.Command {
 				Reason:        reason,
 			}
 			if cmd.Flags().Changed("status") {
-				input.Status = stringPtr(status)
+				input.Status = ptr(status)
 			}
 
 			body, err := mergePayloadWithStruct(payload, filePath, input)
 			if err != nil {
 				return err
 			}
-			query := app.ResolvedQuery("POST", "/time-off", nil)
-			plan := RequestPlan{
-				CommandPath:   "time-off create",
-				Method:        "POST",
-				Endpoint:      "/time-off",
-				Query:         query,
-				Body:          body,
-				RequiredScope: app.RequiredScope("POST", "/time-off"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
 
 			var created api.TimeOffRequest
-			err = client.Do(cmd.Context(), "POST", "/time-off", query, body, &created)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "time-off create",
+				Method:      "POST",
+				Endpoint:    "/time-off",
+				Body:        body,
+				Out:         &created,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 			if app.Printer().IsJSON() {
 				return app.PrintData(created)
 			}
-			app.Printer().PrintMessage("Created time off request: %s", created.ID)
-			app.Printer().PrintMessage("Status: %s", created.Status)
+			app.Printer().Aux("Created time off request: %s", created.ID)
+			app.Printer().Aux("Status: %s", created.Status)
 			return nil
 		},
 	}
@@ -216,7 +223,9 @@ func newTimeOffUpdateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update <request-id>",
 		Short: "Update a time off request",
-		Args:  cobra.ExactArgs(1),
+		Example: `  # Change end date
+  supervisible time-off update 019404f3-... --end-date 2026-07-22`,
+		Args: argsWithUsage(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -229,29 +238,29 @@ func newTimeOffUpdateCommand() *cobra.Command {
 			input := api.UpdateTimeOffInput{}
 			changed := false
 			if cmd.Flags().Changed("time-off-type-id") {
-				input.TimeOffTypeID = stringPtr(timeOffTypeID)
+				input.TimeOffTypeID = ptr(timeOffTypeID)
 				changed = true
 			}
 			if cmd.Flags().Changed("start-date") {
 				if err := validateOptionalDate("start-date", startDate); err != nil {
 					return err
 				}
-				input.StartDate = stringPtr(startDate)
+				input.StartDate = ptr(startDate)
 				changed = true
 			}
 			if cmd.Flags().Changed("end-date") {
 				if err := validateOptionalDate("end-date", endDate); err != nil {
 					return err
 				}
-				input.EndDate = stringPtr(endDate)
+				input.EndDate = ptr(endDate)
 				changed = true
 			}
 			if cmd.Flags().Changed("availability") {
-				input.Availability = intPtr(availability)
+				input.Availability = ptr(availability)
 				changed = true
 			}
 			if cmd.Flags().Changed("reason") {
-				input.Reason = stringPtr(reason)
+				input.Reason = ptr(reason)
 				changed = true
 			}
 
@@ -263,34 +272,27 @@ func newTimeOffUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			query := app.ResolvedQuery("PATCH", "/time-off/{request_id}", nil)
-			plan := RequestPlan{
-				CommandPath:   "time-off update",
-				Method:        "PATCH",
-				Endpoint:      "/time-off/" + args[0],
-				Query:         query,
-				Body:          body,
-				RequiredScope: app.RequiredScope("PATCH", "/time-off/{request_id}"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
 
 			var updated api.TimeOffRequest
-			err = client.Do(cmd.Context(), "PATCH", "/time-off/"+args[0], query, body, &updated)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "time-off update",
+				Method:      "PATCH",
+				Endpoint:    "/time-off/{request_id}",
+				Path:        "/time-off/" + args[0],
+				Body:        body,
+				Out:         &updated,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 			if app.Printer().IsJSON() {
 				return app.PrintData(updated)
 			}
-			app.Printer().PrintMessage("Updated time off request: %s", updated.ID)
-			app.Printer().PrintMessage("Status: %s", updated.Status)
+			app.Printer().Aux("Updated time off request: %s", updated.ID)
+			app.Printer().Aux("Status: %s", updated.Status)
 			return nil
 		},
 	}
@@ -312,7 +314,9 @@ func newTimeOffDeleteCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "delete <request-id>",
 		Short: "Delete a time off request",
-		Args:  cobra.ExactArgs(1),
+		Example: `  # Delete by request ID
+  supervisible time-off delete 019404f3-...`,
+		Args: argsWithUsage(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -325,32 +329,24 @@ func newTimeOffDeleteCommand() *cobra.Command {
 				return err
 			}
 
-			query := app.ResolvedQuery("DELETE", "/time-off/{request_id}", nil)
-			plan := RequestPlan{
-				CommandPath:   "time-off delete",
-				Method:        "DELETE",
-				Endpoint:      "/time-off/" + args[0],
-				Query:         query,
-				RequiredScope: app.RequiredScope("DELETE", "/time-off/{request_id}"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
-
 			var deleted map[string]string
-			err = client.Do(cmd.Context(), "DELETE", "/time-off/"+args[0], query, nil, &deleted)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "time-off delete",
+				Method:      "DELETE",
+				Endpoint:    "/time-off/{request_id}",
+				Path:        "/time-off/" + args[0],
+				Out:         &deleted,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 			if app.Printer().IsJSON() {
 				return app.PrintData(deleted)
 			}
-			app.Printer().PrintMessage("Deleted request: %s", deleted["id"])
+			app.Printer().Aux("Deleted request: %s", deleted["id"])
 			return nil
 		},
 	}
@@ -365,7 +361,9 @@ func newTimeOffApproveCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "approve <request-id>",
 		Short: "Approve a time off request",
-		Args:  cobra.ExactArgs(1),
+		Args:  argsWithUsage(cobra.ExactArgs(1)),
+		Example: `  # Approve a pending request
+  supervisible time-off approve 019404f3-...`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -378,32 +376,24 @@ func newTimeOffApproveCommand() *cobra.Command {
 				return err
 			}
 
-			query := app.ResolvedQuery("POST", "/time-off/{request_id}/approve", nil)
-			plan := RequestPlan{
-				CommandPath:   "time-off approve",
-				Method:        "POST",
-				Endpoint:      "/time-off/" + args[0] + "/approve",
-				Query:         query,
-				RequiredScope: app.RequiredScope("POST", "/time-off/{request_id}/approve"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
-
 			var approved api.TimeOffRequest
-			err = client.Do(cmd.Context(), "POST", "/time-off/"+args[0]+"/approve", query, nil, &approved)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "time-off approve",
+				Method:      "POST",
+				Endpoint:    "/time-off/{request_id}/approve",
+				Path:        "/time-off/" + args[0] + "/approve",
+				Out:         &approved,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 			if app.Printer().IsJSON() {
 				return app.PrintData(approved)
 			}
-			app.Printer().PrintMessage("Approved request: %s", approved.ID)
+			app.Printer().Aux("Approved request: %s", approved.ID)
 			return nil
 		},
 	}
@@ -418,7 +408,9 @@ func newTimeOffRejectCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "reject <request-id>",
 		Short: "Reject a time off request",
-		Args:  cobra.ExactArgs(1),
+		Args:  argsWithUsage(cobra.ExactArgs(1)),
+		Example: `  # Reject with a reason
+  supervisible time-off reject 019404f3-... --reason "Coverage conflict"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if strings.TrimSpace(reason) == "" {
 				return fmt.Errorf("--reason is required")
@@ -437,33 +429,26 @@ func newTimeOffRejectCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			query := app.ResolvedQuery("POST", "/time-off/{request_id}/reject", nil)
-			plan := RequestPlan{
-				CommandPath:   "time-off reject",
-				Method:        "POST",
-				Endpoint:      "/time-off/" + args[0] + "/reject",
-				Query:         query,
-				Body:          body,
-				RequiredScope: app.RequiredScope("POST", "/time-off/{request_id}/reject"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
 
 			var rejected api.TimeOffRequest
-			err = client.Do(cmd.Context(), "POST", "/time-off/"+args[0]+"/reject", query, body, &rejected)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "time-off reject",
+				Method:      "POST",
+				Endpoint:    "/time-off/{request_id}/reject",
+				Path:        "/time-off/" + args[0] + "/reject",
+				Body:        body,
+				Out:         &rejected,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 			if app.Printer().IsJSON() {
 				return app.PrintData(rejected)
 			}
-			app.Printer().PrintMessage("Rejected request: %s", rejected.ID)
+			app.Printer().Aux("Rejected request: %s", rejected.ID)
 			return nil
 		},
 	}

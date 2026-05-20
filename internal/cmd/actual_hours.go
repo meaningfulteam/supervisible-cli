@@ -20,6 +20,7 @@ func newActualHoursCommand() *cobra.Command {
 	cmd.AddCommand(
 		newActualHoursListCommand(),
 		newActualHoursUpsertCommand(),
+		newActualHoursDeleteCommand(),
 	)
 
 	return cmd
@@ -38,12 +39,14 @@ func newActualHoursListCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List actual hours",
+		Example: `  # Actuals for one user over a range
+  supervisible actual-hours list --user-id <uuid> \
+    --start-date 2026-05-01 --end-date 2026-05-31 --json
+
+  # Actuals for one project
+  supervisible actual-hours list --project-id <uuid> --limit 100`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
-			if err != nil {
-				return err
-			}
-			client, err := app.RequireClient()
 			if err != nil {
 				return err
 			}
@@ -63,12 +66,20 @@ func newActualHoursListCommand() *cobra.Command {
 			}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
-			query := app.ResolvedQuery("GET", "/actual-hours", baseQuery)
 
 			var items []api.ActualHour
-			err = client.Do(cmd.Context(), "GET", "/actual-hours", query, nil, &items)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "actual-hours list",
+				Method:      "GET",
+				Endpoint:    "/actual-hours",
+				Query:       baseQuery,
+				Out:         &items,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
@@ -113,13 +124,15 @@ func newActualHoursUpsertCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upsert",
 		Short: "Upsert actual hours",
-		Long: `Upsert actual hours via individual flags or bulk JSON.
+		Long:  `Upsert actual hours via individual flags or bulk JSON.`,
+		Example: `  # Single item via flags
+  supervisible actual-hours upsert --user-id <uuid> --project-id <uuid> \
+    --date 2026-03-06 --hours 5
 
-Single item:
-  supervisible actual-hours upsert --user-id UUID --project-id UUID --date 2026-03-06 --hours 5
+  # Bulk via inline JSON
+  supervisible actual-hours upsert --body '{"items":[...]}'
 
-Bulk:
-  supervisible actual-hours upsert --payload '{"items":[...]}'
+  # Bulk from a file
   supervisible actual-hours upsert --file payload.json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
@@ -181,35 +194,35 @@ Bulk:
 				}
 			}
 
-			query := app.ResolvedQuery("POST", "/actual-hours", nil)
-			plan := RequestPlan{
-				CommandPath:   "actual-hours upsert",
-				Method:        "POST",
-				Endpoint:      "/actual-hours",
-				Query:         query,
-				Body:          rawBody,
-				RequiredScope: app.RequiredScope("POST", "/actual-hours"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
-
 			var items []api.ActualHour
-			err = client.Do(cmd.Context(), "POST", "/actual-hours", query, rawBody, &items)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "actual-hours upsert",
+				Method:      "POST",
+				Endpoint:    "/actual-hours",
+				Body:        rawBody,
+				Out:         &items,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(items)
 			}
-			app.Printer().PrintMessage("Upserted %d actual-hour row(s)", len(items))
-			return nil
+			rows := make([][]string, 0, len(items))
+			for _, item := range items {
+				rows = append(rows, []string{
+					item.ID,
+					item.UserID,
+					item.ProjectID,
+					item.Date,
+					fmt.Sprintf("%d", item.Hours),
+				})
+			}
+			return app.Printer().Table([]string{"ID", "USER_ID", "PROJECT_ID", "DATE", "HOURS"}, rows)
 		},
 	}
 
@@ -224,4 +237,49 @@ Bulk:
 	cmd.MarkFlagsMutuallyExclusive("payload", "file")
 	cmd.MarkFlagsMutuallyExclusive("body", "file")
 	return cmd
+}
+
+func newActualHoursDeleteCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <id>",
+		Short: "Delete an actual hour entry",
+		Args:  argsWithUsage(cobra.ExactArgs(1)),
+		Example: `  # Delete by actual-hour ID
+  supervisible actual-hours delete 019404f3-...`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := appFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			if err := requireUUIDArg("id", args[0]); err != nil {
+				return err
+			}
+
+			query := app.ResolvedQuery("DELETE", "/actual-hours/{actual_hour_id}", nil)
+			plan := RequestPlan{
+				CommandPath:   "actual-hours delete",
+				Method:        "DELETE",
+				Endpoint:      "/actual-hours/" + args[0],
+				Query:         query,
+				RequiredScope: app.RequiredScope("DELETE", "/actual-hours/{actual_hour_id}"),
+			}
+			if app.MaybeDryRun(plan) {
+				return nil
+			}
+
+			client, err := app.RequireClient()
+			if err != nil {
+				return err
+			}
+
+			if err := client.DeleteActualHour(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			if app.Printer().IsJSON() {
+				return app.PrintData(map[string]string{"id": args[0]})
+			}
+			app.Printer().Aux("Deleted actual-hour: %s", args[0])
+			return nil
+		},
+	}
 }

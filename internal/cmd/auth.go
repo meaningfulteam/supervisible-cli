@@ -41,6 +41,14 @@ func newAuthLoginCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "login",
 		Short: "Store an API key for future commands",
+		Example: `  # Pass the API key inline (scripts, agents)
+  supervisible auth login --api-key sv_live_xxx
+
+  # Pipe the key from stdin
+  cat ~/.secrets/supervisible | supervisible auth login --from-stdin
+
+  # Interactive prompt (TTY only)
+  supervisible auth login`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -58,12 +66,15 @@ func newAuthLoginCommand() *cobra.Command {
 				}
 				token = strings.TrimSpace(string(stdinData))
 			default:
-				app.Printer().PrintMessage("Paste your Supervisible API key:")
+				if !isStdinInteractive() {
+					return fmt.Errorf("api key required. Use --api-key sv_live_..., pipe via --from-stdin, or run interactively in a terminal")
+				}
+				app.Printer().Aux("Paste your Supervisible API key:")
 				password, readErr := term.ReadPassword(int(os.Stdin.Fd()))
 				if readErr != nil {
 					return fmt.Errorf("read api key: %w", readErr)
 				}
-				app.Printer().PrintMessage("")
+				app.Printer().Aux("")
 				token = strings.TrimSpace(string(password))
 			}
 
@@ -90,17 +101,17 @@ func newAuthLoginCommand() *cobra.Command {
 			}
 
 			if app.Printer().IsJSON() {
-				return app.Printer().PrintJSON(map[string]any{
+				return app.Printer().Data(map[string]any{
 					"authenticated": true,
 					"base_url":      app.BaseURL(),
 					"storage":       source,
 				})
 			}
 
-			app.Printer().PrintMessage("Authentication successful")
-			app.Printer().PrintMessage("Base URL: %s", app.BaseURL())
-			app.Printer().PrintMessage("Stored in: %s", source)
-			app.Printer().PrintMessage("Token: %s", output.MaskToken(token))
+			app.Printer().Aux("Authentication successful")
+			app.Printer().Aux("Base URL: %s", app.BaseURL())
+			app.Printer().Aux("Stored in: %s", source)
+			app.Printer().Aux("Token: %s", output.MaskToken(token))
 			return nil
 		},
 	}
@@ -118,6 +129,11 @@ func newAuthStatusCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "status",
 		Short: "Show authentication status",
+		Example: `  # Show local auth state (no network call)
+  supervisible auth status
+
+  # Verify the key actually works against /me
+  supervisible auth status --verify`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -147,20 +163,21 @@ func newAuthStatusCommand() *cobra.Command {
 			}
 
 			if app.Printer().IsJSON() {
-				return app.Printer().PrintJSON(status)
+				return app.Printer().Data(status)
 			}
 
-			app.Printer().PrintMessage("Base URL: %s", status["base_url"])
-			app.Printer().PrintMessage("Config: %s", status["config_file"])
-			app.Printer().PrintMessage("Authenticated: %v", status["authenticated"])
+			w := app.Printer().Stdout()
+			fmt.Fprintf(w, "Base URL: %s\n", status["base_url"])
+			fmt.Fprintf(w, "Config: %s\n", status["config_file"])
+			fmt.Fprintf(w, "Authenticated: %v\n", status["authenticated"])
 			if source, ok := status["token_source"].(string); ok && source != "" {
-				app.Printer().PrintMessage("Token source: %s", source)
+				fmt.Fprintf(w, "Token source: %s\n", source)
 			}
 			if verify {
 				if verified, ok := status["verified"].(bool); ok && verified {
-					app.Printer().PrintMessage("Verification: ok")
+					fmt.Fprintln(w, "Verification: ok")
 				} else if errMsg, ok := status["verification_error"].(string); ok && errMsg != "" {
-					app.Printer().PrintMessage("Verification: failed (%s)", errMsg)
+					fmt.Fprintf(w, "Verification: failed (%s)\n", errMsg)
 				}
 			}
 			return nil
@@ -175,6 +192,8 @@ func newAuthLogoutCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "logout",
 		Short: "Delete stored API credentials",
+		Example: `  # Remove the stored API key for the current base URL
+  supervisible auth logout`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -184,9 +203,9 @@ func newAuthLogoutCommand() *cobra.Command {
 				return err
 			}
 			if app.Printer().IsJSON() {
-				return app.Printer().PrintJSON(map[string]any{"logged_out": true})
+				return app.Printer().Data(map[string]any{"logged_out": true})
 			}
-			app.Printer().PrintMessage("Logged out")
+			app.Printer().Aux("Logged out")
 			return nil
 		},
 	}
@@ -198,6 +217,11 @@ func newAuthTokenCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "token",
 		Short: "Print current API key",
+		Example: `  # Print the raw API key (for piping into other tools)
+  supervisible auth token
+
+  # Print a masked version (safe for screenshots/logs)
+  supervisible auth token --masked`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -211,8 +235,7 @@ func newAuthTokenCommand() *cobra.Command {
 			if masked {
 				token = output.MaskToken(token)
 			}
-			app.Printer().PrintMessage("%s", token)
-			return nil
+			return app.Printer().Data(token)
 		},
 	}
 

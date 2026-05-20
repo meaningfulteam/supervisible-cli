@@ -9,7 +9,7 @@ import (
 
 func TestComputeCapacity_NoAssignmentsNoTimeOff(t *testing.T) {
 	users := []api.User{
-		{ID: "u1", Name: stringPtr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
+		{ID: "u1", Name: ptr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
 	}
 	weekStart := time.Date(2026, time.May, 18, 0, 0, 0, 0, time.UTC)
 	weekEnd := time.Date(2026, time.May, 24, 0, 0, 0, 0, time.UTC)
@@ -36,7 +36,7 @@ func TestComputeCapacity_NoAssignmentsNoTimeOff(t *testing.T) {
 
 func TestComputeCapacity_AssignedHours(t *testing.T) {
 	users := []api.User{
-		{ID: "u1", Name: stringPtr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
+		{ID: "u1", Name: ptr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
 	}
 	assignments := []api.Assignment{
 		{ID: "a1", UserID: "u1", ProjectID: "p1", Date: "2026-05-19", Hours: 20, Project: &api.ExpandedProject{ID: "p1", Name: "Aplazo"}},
@@ -68,7 +68,7 @@ func TestComputeCapacity_AssignedHours(t *testing.T) {
 
 func TestComputeCapacity_TimeOff_FullDays(t *testing.T) {
 	users := []api.User{
-		{ID: "u1", Name: stringPtr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
+		{ID: "u1", Name: ptr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
 	}
 	// 2 business days off (Wed-Thu), availability=0
 	timeOff := []api.TimeOffRequest{
@@ -109,7 +109,7 @@ func TestComputeCapacity_TimeOff_FullDays(t *testing.T) {
 
 func TestComputeCapacity_TimeOff_PartialDay(t *testing.T) {
 	users := []api.User{
-		{ID: "u1", Name: stringPtr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
+		{ID: "u1", Name: ptr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
 	}
 	// 1 day, availability=4 (half day off)
 	timeOff := []api.TimeOffRequest{
@@ -140,7 +140,7 @@ func TestComputeCapacity_TimeOff_PartialDay(t *testing.T) {
 
 func TestComputeCapacity_TimeOff_SpanningWeekend(t *testing.T) {
 	users := []api.User{
-		{ID: "u1", Name: stringPtr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
+		{ID: "u1", Name: ptr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
 	}
 	// Time-off Thu to next Mon (Thu, Fri = 2 business days in this week)
 	timeOff := []api.TimeOffRequest{
@@ -168,7 +168,7 @@ func TestComputeCapacity_TimeOff_SpanningWeekend(t *testing.T) {
 
 func TestComputeCapacity_MultipleAssignmentsSameProject(t *testing.T) {
 	users := []api.User{
-		{ID: "u1", Name: stringPtr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
+		{ID: "u1", Name: ptr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
 	}
 	assignments := []api.Assignment{
 		{ID: "a1", UserID: "u1", ProjectID: "p1", Date: "2026-05-19", Hours: 8, Project: &api.ExpandedProject{ID: "p1", Name: "Aplazo"}},
@@ -194,7 +194,7 @@ func TestComputeCapacity_MultipleAssignmentsSameProject(t *testing.T) {
 
 func TestComputeCapacity_Overallocated(t *testing.T) {
 	users := []api.User{
-		{ID: "u1", Name: stringPtr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
+		{ID: "u1", Name: ptr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
 	}
 	assignments := []api.Assignment{
 		{ID: "a1", UserID: "u1", ProjectID: "p1", Date: "2026-05-19", Hours: 48, Project: &api.ExpandedProject{ID: "p1", Name: "Overload"}},
@@ -232,7 +232,7 @@ func TestComputeCapacity_ReportMetadata(t *testing.T) {
 
 func TestComputeCapacity_ProjectFallbackToID(t *testing.T) {
 	users := []api.User{
-		{ID: "u1", Name: stringPtr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
+		{ID: "u1", Name: ptr("Alice"), Email: "alice@test.com", DefaultAvailability: 40, IsActive: true},
 	}
 	// Assignment without expanded project
 	assignments := []api.Assignment{

@@ -22,6 +22,11 @@ func newSchemaEndpointsCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "endpoints",
 		Short: "List available API endpoints",
+		Example: `  # List every endpoint in the loaded schema
+  supervisible schema endpoints
+
+  # JSON for agents
+  supervisible schema endpoints --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -37,7 +42,7 @@ func newSchemaEndpointsCommand() *cobra.Command {
 			})
 
 			if app.Printer().IsJSON() {
-				return app.Printer().PrintJSON(endpoints)
+				return app.Printer().Data(endpoints)
 			}
 
 			rows := make([][]string, 0, len(endpoints))
@@ -53,7 +58,12 @@ func newSchemaDescribeCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "describe <operation|\"METHOD /path\">",
 		Short: "Describe a specific API operation",
-		Args:  cobra.ExactArgs(1),
+		Args:  argsWithUsage(cobra.ExactArgs(1)),
+		Example: `  # Describe by operation ID
+  supervisible schema describe assignments.get
+
+  # Describe by method + path
+  supervisible schema describe "GET /assignments"`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -79,16 +89,17 @@ func newSchemaDescribeCommand() *cobra.Command {
 			}
 
 			if app.Printer().IsJSON() {
-				return app.Printer().PrintJSON(payload)
+				return app.Printer().Data(payload)
 			}
 
-			app.Printer().PrintMessage("%s %s", endpoint.Method, endpoint.Path)
-			app.Printer().PrintMessage("Operation: %s", endpoint.Operation)
+			w := app.Printer().Stdout()
+			fmt.Fprintf(w, "%s %s\n", endpoint.Method, endpoint.Path)
+			fmt.Fprintf(w, "Operation: %s\n", endpoint.Operation)
 			if endpoint.RequiredScope != "" {
-				app.Printer().PrintMessage("Required scope: %s", endpoint.RequiredScope)
+				fmt.Fprintf(w, "Required scope: %s\n", endpoint.RequiredScope)
 			}
 			if endpoint.Summary != "" {
-				app.Printer().PrintMessage("Summary: %s", endpoint.Summary)
+				fmt.Fprintf(w, "Summary: %s\n", endpoint.Summary)
 			}
 			return nil
 		},

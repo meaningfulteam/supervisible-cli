@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 	"github.com/supervisible/supervisible-cli/internal/version"
 )
@@ -9,6 +11,11 @@ func newVersionCommand() *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print CLI version",
+		Example: `  # Show CLI version
+  supervisible version
+
+  # JSON form
+  supervisible version --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -20,11 +27,12 @@ func newVersionCommand() *cobra.Command {
 				"date":    version.Date,
 			}
 			if app.Printer().IsJSON() {
-				return app.Printer().PrintJSON(payload)
+				return app.Printer().Data(payload)
 			}
-			app.Printer().PrintMessage("version: %s", version.Version)
-			app.Printer().PrintMessage("commit: %s", version.Commit)
-			app.Printer().PrintMessage("date: %s", version.Date)
+			w := app.Printer().Stdout()
+			fmt.Fprintf(w, "version: %s\n", version.Version)
+			fmt.Fprintf(w, "commit: %s\n", version.Commit)
+			fmt.Fprintf(w, "date: %s\n", version.Date)
 			return nil
 		},
 	}

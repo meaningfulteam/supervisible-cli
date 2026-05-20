@@ -20,6 +20,7 @@ func newAssignmentsCommand() *cobra.Command {
 	cmd.AddCommand(
 		newAssignmentsListCommand(),
 		newAssignmentsUpsertCommand(),
+		newAssignmentsDeleteCommand(),
 	)
 
 	return cmd
@@ -38,12 +39,14 @@ func newAssignmentsListCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List assignments",
+		Example: `  # Assignments for one user this month
+  supervisible assignments list --user-id <user-uuid> \
+    --start-date 2026-05-01 --end-date 2026-05-31 --json
+
+  # Assignments for one project
+  supervisible assignments list --project-id <project-uuid> --limit 100`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
-			if err != nil {
-				return err
-			}
-			client, err := app.RequireClient()
 			if err != nil {
 				return err
 			}
@@ -63,12 +66,20 @@ func newAssignmentsListCommand() *cobra.Command {
 			}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
-			query := app.ResolvedQuery("GET", "/assignments", baseQuery)
 
 			var items []api.Assignment
-			err = client.Do(cmd.Context(), "GET", "/assignments", query, nil, &items)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "assignments list",
+				Method:      "GET",
+				Endpoint:    "/assignments",
+				Query:       baseQuery,
+				Out:         &items,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
@@ -113,13 +124,15 @@ func newAssignmentsUpsertCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "upsert",
 		Short: "Upsert assignments",
-		Long: `Upsert assignments via individual flags or bulk JSON.
+		Long:  `Upsert assignments via individual flags or bulk JSON.`,
+		Example: `  # Single item via flags
+  supervisible assignments upsert --user-id <uuid> --project-id <uuid> \
+    --date 2026-03-06 --hours 8 --capability-id <uuid>
 
-Single item:
-  supervisible assignments upsert --user-id UUID --project-id UUID --date 2026-03-06 --hours 8
+  # Bulk via inline JSON
+  supervisible assignments upsert --body '{"items":[...]}'
 
-Bulk:
-  supervisible assignments upsert --payload '{"items":[...]}'
+  # Bulk from a file
   supervisible assignments upsert --file payload.json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
@@ -181,35 +194,35 @@ Bulk:
 				}
 			}
 
-			query := app.ResolvedQuery("POST", "/assignments", nil)
-			plan := RequestPlan{
-				CommandPath:   "assignments upsert",
-				Method:        "POST",
-				Endpoint:      "/assignments",
-				Query:         query,
-				Body:          rawBody,
-				RequiredScope: app.RequiredScope("POST", "/assignments"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
-
 			var items []api.Assignment
-			err = client.Do(cmd.Context(), "POST", "/assignments", query, rawBody, &items)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "assignments upsert",
+				Method:      "POST",
+				Endpoint:    "/assignments",
+				Body:        rawBody,
+				Out:         &items,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(items)
 			}
-			app.Printer().PrintMessage("Upserted %d assignment(s)", len(items))
-			return nil
+			rows := make([][]string, 0, len(items))
+			for _, item := range items {
+				rows = append(rows, []string{
+					item.ID,
+					item.UserID,
+					item.ProjectID,
+					item.Date,
+					fmt.Sprintf("%d", item.Hours),
+				})
+			}
+			return app.Printer().Table([]string{"ID", "USER_ID", "PROJECT_ID", "DATE", "HOURS"}, rows)
 		},
 	}
 
@@ -224,4 +237,49 @@ Bulk:
 	cmd.MarkFlagsMutuallyExclusive("payload", "file")
 	cmd.MarkFlagsMutuallyExclusive("body", "file")
 	return cmd
+}
+
+func newAssignmentsDeleteCommand() *cobra.Command {
+	return &cobra.Command{
+		Use:   "delete <id>",
+		Short: "Delete an assignment",
+		Args:  argsWithUsage(cobra.ExactArgs(1)),
+		Example: `  # Delete by assignment ID
+  supervisible assignments delete 019404f3-...`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			app, err := appFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			if err := requireUUIDArg("id", args[0]); err != nil {
+				return err
+			}
+
+			query := app.ResolvedQuery("DELETE", "/assignments/{assignment_id}", nil)
+			plan := RequestPlan{
+				CommandPath:   "assignments delete",
+				Method:        "DELETE",
+				Endpoint:      "/assignments/" + args[0],
+				Query:         query,
+				RequiredScope: app.RequiredScope("DELETE", "/assignments/{assignment_id}"),
+			}
+			if app.MaybeDryRun(plan) {
+				return nil
+			}
+
+			client, err := app.RequireClient()
+			if err != nil {
+				return err
+			}
+
+			if err := client.DeleteAssignment(cmd.Context(), args[0]); err != nil {
+				return err
+			}
+			if app.Printer().IsJSON() {
+				return app.PrintData(map[string]string{"id": args[0]})
+			}
+			app.Printer().Aux("Deleted assignment: %s", args[0])
+			return nil
+		},
+	}
 }

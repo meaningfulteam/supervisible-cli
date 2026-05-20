@@ -34,12 +34,13 @@ func newClientsListCommand() *cobra.Command {
 		Use:   "list",
 		Short: "List clients",
 		Args:  cobra.NoArgs,
+		Example: `  # List active clients
+  supervisible clients list
+
+  # Paginate JSON for agents
+  supervisible clients list --limit 50 --offset 0 --json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			app, err := appFromCommand(cmd)
-			if err != nil {
-				return err
-			}
-			client, err := app.RequireClient()
 			if err != nil {
 				return err
 			}
@@ -47,12 +48,20 @@ func newClientsListCommand() *cobra.Command {
 			baseQuery := url.Values{}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
-			query := app.ResolvedQuery("GET", "/clients", baseQuery)
 
 			var clients []api.ClientResource
-			err = client.Do(cmd.Context(), "GET", "/clients", query, nil, &clients)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "clients list",
+				Method:      "GET",
+				Endpoint:    "/clients",
+				Query:       baseQuery,
+				Out:         &clients,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
@@ -97,6 +106,11 @@ func newClientsCreateCommand() *cobra.Command {
 		Use:   "create",
 		Short: "Create a client",
 		Args:  cobra.NoArgs,
+		Example: `  # Quick create via flags
+  supervisible clients create --company-name "Acme Co" --website https://acme.com
+
+  # Create from a JSON file
+  supervisible clients create --file client.json`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if strings.TrimSpace(companyName) == "" {
 				return fmt.Errorf("--company-name is required")
@@ -109,64 +123,56 @@ func newClientsCreateCommand() *cobra.Command {
 
 			input := api.CreateClientInput{CompanyName: companyName}
 			if cmd.Flags().Changed("email") {
-				input.Email = stringPtr(email)
+				input.Email = ptr(email)
 			}
 			if cmd.Flags().Changed("image") {
-				input.Image = stringPtr(image)
+				input.Image = ptr(image)
 			}
 			if cmd.Flags().Changed("country-code") {
-				input.CountryCode = stringPtr(countryCode)
+				input.CountryCode = ptr(countryCode)
 			}
 			if cmd.Flags().Changed("website") {
-				input.Website = stringPtr(website)
+				input.Website = ptr(website)
 			}
 			if cmd.Flags().Changed("is-active") {
-				input.IsActive = boolPtr(isActive)
+				input.IsActive = ptr(isActive)
 			}
 			if cmd.Flags().Changed("priority") {
-				input.ClientPriority = stringPtr(clientPriority)
+				input.ClientPriority = ptr(clientPriority)
 			}
 			if cmd.Flags().Changed("categories") {
 				input.Categories = splitCSV(categories)
 			}
 			if cmd.Flags().Changed("account-manager-id") {
-				input.AccountManagerID = stringPtr(accountManagerID)
+				input.AccountManagerID = ptr(accountManagerID)
 			}
 
 			body, err := mergePayloadWithStruct(payload, filePath, input)
 			if err != nil {
 				return err
 			}
-			query := app.ResolvedQuery("POST", "/clients", nil)
-			plan := RequestPlan{
-				CommandPath:   "clients create",
-				Method:        "POST",
-				Endpoint:      "/clients",
-				Query:         query,
-				Body:          body,
-				RequiredScope: app.RequiredScope("POST", "/clients"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
 
 			var created api.ClientResource
-			err = client.Do(cmd.Context(), "POST", "/clients", query, body, &created)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "clients create",
+				Method:      "POST",
+				Endpoint:    "/clients",
+				Body:        body,
+				Out:         &created,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(created)
 			}
 
-			app.Printer().PrintMessage("Created client: %s", created.ID)
-			app.Printer().PrintMessage("Name: %s", created.CompanyName)
+			app.Printer().Aux("Created client: %s", created.ID)
+			app.Printer().Aux("Name: %s", created.CompanyName)
 			return nil
 		},
 	}
@@ -204,7 +210,12 @@ func newClientsUpdateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "update <client-id>",
 		Short: "Update a client",
-		Args:  cobra.ExactArgs(1),
+		Args:  argsWithUsage(cobra.ExactArgs(1)),
+		Example: `  # Rename a client
+  supervisible clients update 019404f3-... --company-name "Acme, Inc."
+
+  # Update via JSON payload
+  supervisible clients update 019404f3-... --body '{"isActive":false}'`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
@@ -218,31 +229,31 @@ func newClientsUpdateCommand() *cobra.Command {
 			changed := false
 
 			if cmd.Flags().Changed("company-name") {
-				input.CompanyName = stringPtr(companyName)
+				input.CompanyName = ptr(companyName)
 				changed = true
 			}
 			if cmd.Flags().Changed("email") {
-				input.Email = stringPtr(email)
+				input.Email = ptr(email)
 				changed = true
 			}
 			if cmd.Flags().Changed("image") {
-				input.Image = stringPtr(image)
+				input.Image = ptr(image)
 				changed = true
 			}
 			if cmd.Flags().Changed("country-code") {
-				input.CountryCode = stringPtr(countryCode)
+				input.CountryCode = ptr(countryCode)
 				changed = true
 			}
 			if cmd.Flags().Changed("website") {
-				input.Website = stringPtr(website)
+				input.Website = ptr(website)
 				changed = true
 			}
 			if cmd.Flags().Changed("is-active") {
-				input.IsActive = boolPtr(isActive)
+				input.IsActive = ptr(isActive)
 				changed = true
 			}
 			if cmd.Flags().Changed("priority") {
-				input.ClientPriority = stringPtr(clientPriority)
+				input.ClientPriority = ptr(clientPriority)
 				changed = true
 			}
 			if cmd.Flags().Changed("categories") {
@@ -250,7 +261,7 @@ func newClientsUpdateCommand() *cobra.Command {
 				changed = true
 			}
 			if cmd.Flags().Changed("account-manager-id") {
-				input.AccountManagerID = stringPtr(accountManagerID)
+				input.AccountManagerID = ptr(accountManagerID)
 				changed = true
 			}
 
@@ -262,36 +273,29 @@ func newClientsUpdateCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			query := app.ResolvedQuery("PATCH", "/clients/{client_id}", nil)
-			plan := RequestPlan{
-				CommandPath:   "clients update",
-				Method:        "PATCH",
-				Endpoint:      "/clients/" + args[0],
-				Query:         query,
-				Body:          body,
-				RequiredScope: app.RequiredScope("PATCH", "/clients/{client_id}"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
-			}
-
-			client, err := app.RequireClient()
-			if err != nil {
-				return err
-			}
 
 			var updated api.ClientResource
-			err = client.Do(cmd.Context(), "PATCH", "/clients/"+args[0], query, body, &updated)
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "clients update",
+				Method:      "PATCH",
+				Endpoint:    "/clients/{client_id}",
+				Path:        "/clients/" + args[0],
+				Body:        body,
+				Out:         &updated,
+			})
 			if err != nil {
 				return err
+			}
+			if !executed {
+				return nil
 			}
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(updated)
 			}
 
-			app.Printer().PrintMessage("Updated client: %s", updated.ID)
-			app.Printer().PrintMessage("Name: %s", updated.CompanyName)
+			app.Printer().Aux("Updated client: %s", updated.ID)
+			app.Printer().Aux("Name: %s", updated.CompanyName)
 			return nil
 		},
 	}

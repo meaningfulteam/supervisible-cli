@@ -44,11 +44,11 @@ func newContextCommand() *cobra.Command {
 		Short: "Machine-readable org summary for agent bootstrap",
 		Long: `Fetch users, clients, and projects to produce a full org context summary.
 
-Designed for AI agents to orient themselves in a single call.
-Always outputs JSON (--json is implicit).
-
-Examples:
+Designed for AI agents to orient themselves in a single call.`,
+		Example: `  # Summary on stdout
   supervisible context
+
+  # JSON for agents
   supervisible context --json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -99,9 +99,9 @@ Examples:
 				return app.PrintData(report)
 			}
 
-			// Table fallback: summary counts
-			app.Printer().PrintMessage("Organization: %s", report.Organization)
-			app.Printer().PrintMessage("%d users, %d clients, %d projects",
+			w := app.Printer().Stdout()
+			fmt.Fprintf(w, "Organization: %s\n", report.Organization)
+			fmt.Fprintf(w, "%d users, %d clients, %d projects\n",
 				len(report.Users), len(report.Clients), len(report.Projects))
 			return nil
 		},

@@ -19,7 +19,12 @@ const (
 	userAgent     = "supervisible-cli"
 )
 
-// Client is a typed client for Supervisible public API v1.
+// Client is a thin HTTP transport for the Supervisible public API.
+//
+// Public surface: NewClient/NewClientWithOptions, Client.Do.
+// Typed helpers (Me, DeleteActualHour, DeleteAssignment) exist only where
+// they earn their keep — auth-specific calls and DELETEs without bodies.
+// Everything else routes through Do.
 type Client struct {
 	httpClient *http.Client
 	baseURL    *url.URL
@@ -27,8 +32,20 @@ type Client struct {
 	userAgent  string
 }
 
+// ClientOptions configures optional client behavior.
+type ClientOptions struct {
+	Timeout  time.Duration
+	Verbose  bool
+	DebugOut io.Writer
+}
+
 // NewClient configures the client with an API key and a base URL.
 func NewClient(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
+	return NewClientWithOptions(baseURL, apiKey, ClientOptions{Timeout: timeout})
+}
+
+// NewClientWithOptions configures the client with extended options.
+func NewClientWithOptions(baseURL, apiKey string, opts ClientOptions) (*Client, error) {
 	if strings.TrimSpace(apiKey) == "" {
 		return nil, fmt.Errorf("missing api key")
 	}
@@ -37,16 +54,97 @@ func NewClient(baseURL, apiKey string, timeout time.Duration) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if timeout <= 0 {
-		timeout = 30 * time.Second
+	if opts.Timeout <= 0 {
+		opts.Timeout = 30 * time.Second
+	}
+
+	httpClient := &http.Client{Timeout: opts.Timeout}
+	if opts.Verbose {
+		dest := opts.DebugOut
+		if dest == nil {
+			dest = io.Discard
+		}
+		httpClient.Transport = &debugRoundTripper{base: http.DefaultTransport, out: dest}
 	}
 
 	return &Client{
-		httpClient: &http.Client{Timeout: timeout},
+		httpClient: httpClient,
 		baseURL:    normalized,
 		apiKey:     apiKey,
 		userAgent:  userAgent,
 	}, nil
+}
+
+// debugRoundTripper dumps HTTP request/response pairs to its writer.
+// Authorization is masked; the response body is restored for downstream readers.
+type debugRoundTripper struct {
+	base http.RoundTripper
+	out  io.Writer
+}
+
+func (d *debugRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	d.dumpRequest(req)
+	resp, err := d.base.RoundTrip(req)
+	if err != nil {
+		fmt.Fprintf(d.out, "[supervisible] transport error: %v\n", err)
+		return nil, err
+	}
+	d.dumpResponse(resp)
+	return resp, nil
+}
+
+func (d *debugRoundTripper) dumpRequest(req *http.Request) {
+	fmt.Fprintf(d.out, "[supervisible] > %s %s\n", req.Method, req.URL.String())
+	for key, values := range req.Header {
+		if strings.EqualFold(key, "Authorization") {
+			for _, v := range values {
+				fmt.Fprintf(d.out, "[supervisible] > %s: %s\n", key, maskAuthorization(v))
+			}
+			continue
+		}
+		for _, v := range values {
+			fmt.Fprintf(d.out, "[supervisible] > %s: %s\n", key, v)
+		}
+	}
+	if req.Body != nil {
+		body, err := io.ReadAll(req.Body)
+		if err == nil {
+			req.Body = io.NopCloser(bytes.NewReader(body))
+			if len(body) > 0 {
+				fmt.Fprintf(d.out, "[supervisible] > body: %s\n", string(body))
+			}
+		}
+	}
+}
+
+func (d *debugRoundTripper) dumpResponse(resp *http.Response) {
+	fmt.Fprintf(d.out, "[supervisible] < %s\n", resp.Status)
+	for key, values := range resp.Header {
+		for _, v := range values {
+			fmt.Fprintf(d.out, "[supervisible] < %s: %s\n", key, v)
+		}
+	}
+	if resp.Body != nil {
+		body, err := io.ReadAll(resp.Body)
+		if err == nil {
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+			if len(body) > 0 {
+				fmt.Fprintf(d.out, "[supervisible] < body: %s\n", string(body))
+			}
+		}
+	}
+}
+
+func maskAuthorization(raw string) string {
+	const prefix = "Bearer "
+	if !strings.HasPrefix(raw, prefix) {
+		return "<redacted>"
+	}
+	token := raw[len(prefix):]
+	if len(token) <= 10 {
+		return prefix + "**********"
+	}
+	return prefix + token[:6] + "..." + token[len(token)-4:]
 }
 
 type apiErrorEnvelope struct {
@@ -223,212 +321,10 @@ func (c *Client) Me(ctx context.Context) (Identity, error) {
 	return out, nil
 }
 
-func (c *Client) ListUsers(ctx context.Context, p Pagination) ([]User, error) {
-	var out []User
-	if err := c.request(ctx, http.MethodGet, "/users", paginationQuery(p), nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+func (c *Client) DeleteActualHour(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodDelete, "/actual-hours/"+id, nil, nil, nil)
 }
 
-func (c *Client) UpdateUser(ctx context.Context, userID string, input UpdateUserInput) (User, error) {
-	var out User
-	if err := c.request(ctx, http.MethodPatch, "/users/"+userID, nil, input, &out); err != nil {
-		return User{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) ListClients(ctx context.Context, p Pagination) ([]ClientResource, error) {
-	var out []ClientResource
-	if err := c.request(ctx, http.MethodGet, "/clients", paginationQuery(p), nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *Client) CreateClient(ctx context.Context, input CreateClientInput) (ClientResource, error) {
-	var out ClientResource
-	if err := c.request(ctx, http.MethodPost, "/clients", nil, input, &out); err != nil {
-		return ClientResource{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) UpdateClient(ctx context.Context, clientID string, input UpdateClientInput) (ClientResource, error) {
-	var out ClientResource
-	if err := c.request(ctx, http.MethodPatch, "/clients/"+clientID, nil, input, &out); err != nil {
-		return ClientResource{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) ListProjects(ctx context.Context, p Pagination) ([]Project, error) {
-	var out []Project
-	if err := c.request(ctx, http.MethodGet, "/projects", paginationQuery(p), nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *Client) CreateProject(ctx context.Context, input CreateProjectInput) (Project, error) {
-	var out Project
-	if err := c.request(ctx, http.MethodPost, "/projects", nil, input, &out); err != nil {
-		return Project{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) UpdateProject(ctx context.Context, projectID string, input UpdateProjectInput) (Project, error) {
-	var out Project
-	if err := c.request(ctx, http.MethodPatch, "/projects/"+projectID, nil, input, &out); err != nil {
-		return Project{}, err
-	}
-	return out, nil
-}
-
-type AssignmentFilters struct {
-	UserID    string
-	ProjectID string
-	StartDate string
-	EndDate   string
-	Pagination
-}
-
-func (c *Client) ListAssignments(ctx context.Context, filters AssignmentFilters) ([]Assignment, error) {
-	q := paginationQuery(filters.Pagination)
-	if filters.UserID != "" {
-		q.Set("user_id", filters.UserID)
-	}
-	if filters.ProjectID != "" {
-		q.Set("project_id", filters.ProjectID)
-	}
-	if filters.StartDate != "" {
-		q.Set("start_date", filters.StartDate)
-	}
-	if filters.EndDate != "" {
-		q.Set("end_date", filters.EndDate)
-	}
-
-	var out []Assignment
-	if err := c.request(ctx, http.MethodGet, "/assignments", q, nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *Client) UpsertAssignments(ctx context.Context, input AssignmentUpsertInput) ([]Assignment, error) {
-	var out []Assignment
-	if err := c.request(ctx, http.MethodPost, "/assignments", nil, input, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-type ActualHourFilters struct {
-	UserID    string
-	ProjectID string
-	StartDate string
-	EndDate   string
-	Pagination
-}
-
-func (c *Client) ListActualHours(ctx context.Context, filters ActualHourFilters) ([]ActualHour, error) {
-	q := paginationQuery(filters.Pagination)
-	if filters.UserID != "" {
-		q.Set("user_id", filters.UserID)
-	}
-	if filters.ProjectID != "" {
-		q.Set("project_id", filters.ProjectID)
-	}
-	if filters.StartDate != "" {
-		q.Set("start_date", filters.StartDate)
-	}
-	if filters.EndDate != "" {
-		q.Set("end_date", filters.EndDate)
-	}
-
-	var out []ActualHour
-	if err := c.request(ctx, http.MethodGet, "/actual-hours", q, nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *Client) UpsertActualHours(ctx context.Context, input ActualHourUpsertInput) ([]ActualHour, error) {
-	var out []ActualHour
-	if err := c.request(ctx, http.MethodPost, "/actual-hours", nil, input, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-type TimeOffFilters struct {
-	UserID    string
-	Status    string
-	StartDate string
-	EndDate   string
-	Pagination
-}
-
-func (c *Client) ListTimeOff(ctx context.Context, filters TimeOffFilters) ([]TimeOffRequest, error) {
-	q := paginationQuery(filters.Pagination)
-	if filters.UserID != "" {
-		q.Set("user_id", filters.UserID)
-	}
-	if filters.Status != "" {
-		q.Set("status", filters.Status)
-	}
-	if filters.StartDate != "" {
-		q.Set("start_date", filters.StartDate)
-	}
-	if filters.EndDate != "" {
-		q.Set("end_date", filters.EndDate)
-	}
-
-	var out []TimeOffRequest
-	if err := c.request(ctx, http.MethodGet, "/time-off", q, nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *Client) CreateTimeOff(ctx context.Context, input CreateTimeOffInput) (TimeOffRequest, error) {
-	var out TimeOffRequest
-	if err := c.request(ctx, http.MethodPost, "/time-off", nil, input, &out); err != nil {
-		return TimeOffRequest{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) UpdateTimeOff(ctx context.Context, requestID string, input UpdateTimeOffInput) (TimeOffRequest, error) {
-	var out TimeOffRequest
-	if err := c.request(ctx, http.MethodPatch, "/time-off/"+requestID, nil, input, &out); err != nil {
-		return TimeOffRequest{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) DeleteTimeOff(ctx context.Context, requestID string) (map[string]string, error) {
-	var out map[string]string
-	if err := c.request(ctx, http.MethodDelete, "/time-off/"+requestID, nil, nil, &out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *Client) ApproveTimeOff(ctx context.Context, requestID string) (TimeOffRequest, error) {
-	var out TimeOffRequest
-	if err := c.request(ctx, http.MethodPost, "/time-off/"+requestID+"/approve", nil, nil, &out); err != nil {
-		return TimeOffRequest{}, err
-	}
-	return out, nil
-}
-
-func (c *Client) RejectTimeOff(ctx context.Context, requestID string, input RejectTimeOffInput) (TimeOffRequest, error) {
-	var out TimeOffRequest
-	if err := c.request(ctx, http.MethodPost, "/time-off/"+requestID+"/reject", nil, input, &out); err != nil {
-		return TimeOffRequest{}, err
-	}
-	return out, nil
+func (c *Client) DeleteAssignment(ctx context.Context, id string) error {
+	return c.request(ctx, http.MethodDelete, "/assignments/"+id, nil, nil, nil)
 }
