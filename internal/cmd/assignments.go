@@ -1,9 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -20,6 +22,7 @@ func newAssignmentsCommand() *cobra.Command {
 	cmd.AddCommand(
 		newAssignmentsListCommand(),
 		newAssignmentsUpsertCommand(),
+		newAssignmentsAddCommand(),
 		newAssignmentsDeleteCommand(),
 	)
 
@@ -111,14 +114,15 @@ func newAssignmentsListCommand() *cobra.Command {
 
 func newAssignmentsUpsertCommand() *cobra.Command {
 	var (
-		jsonBody     string
-		payload      string
-		filePath     string
-		userID       string
-		projectID    string
-		date         string
-		hours        int
-		capabilityID string
+		jsonBody       string
+		payload        string
+		filePath       string
+		userID         string
+		projectID      string
+		date           string
+		hours          int
+		capabilityID   string
+		autoCapability bool
 	)
 
 	cmd := &cobra.Command{
@@ -129,8 +133,8 @@ func newAssignmentsUpsertCommand() *cobra.Command {
   supervisible assignments upsert --user-id <uuid> --project-id <uuid> \
     --date 2026-03-06 --hours 8 --capability-id <uuid>
 
-  # Bulk via inline JSON
-  supervisible assignments upsert --body '{"items":[...]}'
+  # Bulk via inline JSON, with capabilityId resolved per item
+  supervisible assignments upsert --body '{"items":[...]}' --auto-capability
 
   # Bulk from a file
   supervisible assignments upsert --file payload.json`,
@@ -194,6 +198,14 @@ func newAssignmentsUpsertCommand() *cobra.Command {
 				}
 			}
 
+			if autoCapability {
+				if err := fillAutoCapability(cmd.Context(), app, rawBody); err != nil {
+					return err
+				}
+			}
+
+			preflightTimeOff(cmd.Context(), app, rawBody)
+
 			var items []api.Assignment
 			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
 				CommandPath: "assignments upsert",
@@ -234,9 +246,214 @@ func newAssignmentsUpsertCommand() *cobra.Command {
 	cmd.Flags().StringVar(&date, "date", "", "Date YYYY-MM-DD (single-item mode)")
 	cmd.Flags().IntVar(&hours, "hours", 0, "Hours (single-item mode)")
 	cmd.Flags().StringVar(&capabilityID, "capability-id", "", "Capability ID (optional, single-item mode)")
+	cmd.Flags().BoolVar(&autoCapability, "auto-capability", false, "Fill missing capabilityId per item using most-recent (user, project) capability")
 	cmd.MarkFlagsMutuallyExclusive("payload", "file")
 	cmd.MarkFlagsMutuallyExclusive("body", "file")
 	return cmd
+}
+
+// fillAutoCapability scans rawBody["items"] (the upsert envelope) and fills any
+// item missing "capabilityId" by resolving it from the (userId, projectId) pair.
+// Mutates rawBody in place. Returns the combined error if any item fails so
+// callers don't partial-write.
+func fillAutoCapability(ctx context.Context, app *App, rawBody map[string]any) error {
+	itemsRaw, ok := rawBody["items"].([]any)
+	if !ok || len(itemsRaw) == 0 {
+		return nil
+	}
+
+	client, err := app.RequireClient()
+	if err != nil {
+		return err
+	}
+	resolver := newCapabilityResolver(client)
+
+	var failures []string
+	for idx, raw := range itemsRaw {
+		item, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if existing, _ := item["capabilityId"].(string); existing != "" {
+			continue
+		}
+		userID, _ := item["userId"].(string)
+		projectID, _ := item["projectId"].(string)
+		if userID == "" || projectID == "" {
+			failures = append(failures, fmt.Sprintf("item[%d]: cannot resolve capability without userId+projectId", idx))
+			continue
+		}
+		resolved, err := resolver.Resolve(ctx, userID, projectID)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("item[%d]: %v", idx, err))
+			continue
+		}
+		item["capabilityId"] = resolved
+		app.Printer().Aux("capability resolved for %s/%s: %s", userID, projectID, resolved)
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("auto-capability resolution failed:\n  %s", strings.Join(failures, "\n  "))
+	}
+	return nil
+}
+
+func newAssignmentsAddCommand() *cobra.Command {
+	var (
+		userID         string
+		projectID      string
+		date           string
+		delta          int
+		capabilityID   string
+		autoCapability bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "add",
+		Short: "Add hours to an assignment (read-modify-write)",
+		Long: `Add (or subtract) hours from an existing (user, project, capability, date)
+assignment. Fetches the current row, computes new = existing + delta, and upserts.
+
+If no row exists, creates one with hours=delta. If the resulting value would go
+negative, the command fails before writing.
+
+Race condition: another writer can modify the row between read and write. For
+a single-actor CLI this is acceptable; document the trade-off if scripting.`,
+		Example: `  # Add 2h to today's web-dev assignment for Juan, capability auto-resolved
+  supervisible assignments add \
+    --user-id 019404f3-... --project-id 019e1cde-... \
+    --date 2026-05-24 --hours 2 --auto-capability
+
+  # Subtract 1h with explicit capability (no auto-resolve)
+  supervisible assignments add \
+    --user-id 019404f3-... --project-id 019e1cde-... \
+    --capability-id 0194b2e1-... \
+    --date 2026-05-24 --hours -1`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireUUIDArg("user-id", userID); err != nil {
+				return err
+			}
+			if err := requireUUIDArg("project-id", projectID); err != nil {
+				return err
+			}
+			if err := validateOptionalDate("date", date); err != nil {
+				return err
+			}
+			if !cmd.Flags().Changed("hours") {
+				return fmt.Errorf("--hours is required")
+			}
+
+			app, err := appFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			client, err := app.RequireClient()
+			if err != nil {
+				return err
+			}
+
+			// Resolve capability if needed.
+			if capabilityID == "" {
+				if !autoCapability {
+					return fmt.Errorf("either --capability-id or --auto-capability is required")
+				}
+				resolver := newCapabilityResolver(client)
+				resolved, err := resolver.Resolve(cmd.Context(), userID, projectID)
+				if err != nil {
+					return err
+				}
+				capabilityID = resolved
+				app.Printer().Aux("capability resolved for %s/%s: %s", userID, projectID, resolved)
+			} else if err := requireUUIDArg("capability-id", capabilityID); err != nil {
+				return err
+			}
+
+			// Read existing row.
+			existingHours, existingID, err := findAssignmentHours(cmd.Context(), client, userID, projectID, capabilityID, date)
+			if err != nil {
+				return err
+			}
+
+			newHours := existingHours + delta
+			if newHours < 0 {
+				return fmt.Errorf("computed hours would be negative (%d + %d = %d); refusing to write", existingHours, delta, newHours)
+			}
+			if existingID != "" && newHours == 0 {
+				return fmt.Errorf("computed hours = 0 would zombify the row (DELETE /assignments not yet supported by server); use `assignments delete` instead")
+			}
+
+			app.Printer().Aux("assignments add: %s %s %s %dh + %dh = %dh", userID, projectID, date, existingHours, delta, newHours)
+
+			item := map[string]any{
+				"userId":       userID,
+				"projectId":    projectID,
+				"capabilityId": capabilityID,
+				"date":         date,
+				"hours":        newHours,
+			}
+			rawBody := map[string]any{"items": []any{item}}
+
+			preflightTimeOff(cmd.Context(), app, rawBody)
+
+			var items []api.Assignment
+			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
+				CommandPath: "assignments add",
+				Method:      "POST",
+				Endpoint:    "/assignments",
+				Body:        rawBody,
+				Out:         &items,
+			})
+			if err != nil {
+				return err
+			}
+			if !executed {
+				return nil
+			}
+
+			if app.Printer().IsJSON() {
+				return app.PrintData(items)
+			}
+			rows := make([][]string, 0, len(items))
+			for _, it := range items {
+				rows = append(rows, []string{it.ID, it.UserID, it.ProjectID, it.Date, fmt.Sprintf("%d", it.Hours)})
+			}
+			return app.Printer().Table([]string{"ID", "USER_ID", "PROJECT_ID", "DATE", "HOURS"}, rows)
+		},
+	}
+
+	cmd.Flags().StringVar(&userID, "user-id", "", "User ID (required)")
+	cmd.Flags().StringVar(&projectID, "project-id", "", "Project ID (required)")
+	cmd.Flags().StringVar(&date, "date", "", "Date YYYY-MM-DD (required)")
+	cmd.Flags().IntVar(&delta, "hours", 0, "Hours delta to add (can be negative)")
+	cmd.Flags().StringVar(&capabilityID, "capability-id", "", "Capability ID (omit to use --auto-capability)")
+	cmd.Flags().BoolVar(&autoCapability, "auto-capability", true, "Resolve capability from history when --capability-id is empty (default true)")
+	return cmd
+}
+
+// findAssignmentHours returns the existing hours and assignment ID for
+// (user, project, capability, date), or (0, "", nil) when no row exists.
+func findAssignmentHours(ctx context.Context, client *api.Client, userID, projectID, capabilityID, date string) (int, string, error) {
+	q := url.Values{}
+	q.Set("user_id", userID)
+	q.Set("project_id", projectID)
+	q.Set("start_date", date)
+	q.Set("end_date", date)
+	q.Set("limit", "50")
+
+	var rows []api.Assignment
+	if err := client.Do(ctx, "GET", "/assignments", q, nil, &rows); err != nil {
+		return 0, "", fmt.Errorf("fetch existing assignment: %w", err)
+	}
+	for _, r := range rows {
+		if r.Date != date {
+			continue
+		}
+		if r.CapabilityID == nil || *r.CapabilityID != capabilityID {
+			continue
+		}
+		return r.Hours, r.ID, nil
+	}
+	return 0, "", nil
 }
 
 func newAssignmentsDeleteCommand() *cobra.Command {
