@@ -70,6 +70,32 @@ func TestWhoisWeeksFlag_RejectsOutOfBounds(t *testing.T) {
 	}
 }
 
+func TestBuildWhoisReport_WeekSummaryIgnoresFutureWeeks(t *testing.T) {
+	// Regression: with --weeks N, the assignment fetch spans the full window but
+	// WeekSummary must only count the *current* week. Caught live against dev:
+	// Juan Méndez --weeks 4 showed assignedHours=97 when capacity reported 27h
+	// this week.
+	user := api.User{ID: "u1", Email: "u1@test.com", DefaultAvailability: 40}
+	cap := "cap-1"
+	assignments := []api.Assignment{
+		{ID: "this-week-1", UserID: "u1", ProjectID: "p1", CapabilityID: &cap, Date: "2026-05-18", Hours: 8},
+		{ID: "this-week-2", UserID: "u1", ProjectID: "p1", CapabilityID: &cap, Date: "2026-05-22", Hours: 4},
+		{ID: "next-week", UserID: "u1", ProjectID: "p1", CapabilityID: &cap, Date: "2026-05-26", Hours: 20},
+		{ID: "month-out", UserID: "u1", ProjectID: "p1", CapabilityID: &cap, Date: "2026-06-15", Hours: 30},
+	}
+	weekStart := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	weekEnd := weekStart.AddDate(0, 0, 6)
+
+	report := buildWhoisReport(user, assignments, nil, weekStart, weekEnd)
+
+	if len(report.Assignments) != 4 {
+		t.Fatalf("expected all 4 assignments in the array, got %d", len(report.Assignments))
+	}
+	if report.WeekSummary.AssignedHours != 12 {
+		t.Fatalf("WeekSummary.AssignedHours = %d, want 12 (only this-week rows count)", report.WeekSummary.AssignedHours)
+	}
+}
+
 func TestBuildWhoisReport_NilCapabilityIsEmptyString(t *testing.T) {
 	user := api.User{ID: "u1", Email: "u1@test.com", DefaultAvailability: 40}
 	assignments := []api.Assignment{

@@ -200,7 +200,10 @@ func buildWhoisReport(user api.User, assignments []api.Assignment, timeOff []api
 		TimeOff:     make([]WhoisTimeOff, 0, len(timeOff)),
 	}
 
-	assignedHours := 0
+	// WeekSummary.assignedHours stays scoped to weekStart..weekEnd even when
+	// --weeks N pulled a wider assignment window. The full set lands in
+	// report.Assignments so callers can compute their own multi-week aggregates.
+	assignedHoursThisWeek := 0
 	for _, a := range assignments {
 		if a.Hours <= 0 {
 			// Skip zombie rows (hours:0 used as pseudo-delete until DELETE /assignments lands).
@@ -218,7 +221,9 @@ func buildWhoisReport(user api.User, assignments []api.Assignment, timeOff []api
 			Date:         a.Date,
 			Hours:        a.Hours,
 		})
-		assignedHours += a.Hours
+		if d, err := time.Parse("2006-01-02", a.Date); err == nil && !d.Before(weekStart) && !d.After(weekEnd) {
+			assignedHoursThisWeek += a.Hours
+		}
 	}
 
 	for _, to := range timeOff {
@@ -256,9 +261,9 @@ func buildWhoisReport(user api.User, assignments []api.Assignment, timeOff []api
 
 	available := user.DefaultAvailability - timeOffHours
 	report.WeekSummary = WhoisWeekSummary{
-		AssignedHours:  assignedHours,
+		AssignedHours:  assignedHoursThisWeek,
 		AvailableHours: available,
-		FreeHours:      available - assignedHours,
+		FreeHours:      available - assignedHoursThisWeek,
 	}
 
 	return report
