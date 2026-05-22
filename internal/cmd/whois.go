@@ -14,9 +14,12 @@ import (
 // --- Output types for whois command ---
 
 type WhoisAssignment struct {
-	Project string `json:"project"`
-	Date    string `json:"date"`
-	Hours   int    `json:"hours"`
+	ID           string `json:"id"`
+	ProjectID    string `json:"projectId"`
+	CapabilityID string `json:"capabilityId"`
+	Project      string `json:"project"`
+	Date         string `json:"date"`
+	Hours        int    `json:"hours"`
 }
 
 type WhoisTimeOff struct {
@@ -40,13 +43,16 @@ type WhoisUser struct {
 }
 
 type WhoisReport struct {
-	User        WhoisUser         `json:"user"`
-	Assignments []WhoisAssignment `json:"assignments"`
-	TimeOff     []WhoisTimeOff    `json:"timeOff"`
-	WeekSummary WhoisWeekSummary  `json:"weekSummary"`
+	User         WhoisUser         `json:"user"`
+	Assignments  []WhoisAssignment `json:"assignments"`
+	TimeOff      []WhoisTimeOff    `json:"timeOff"`
+	WeekSummary  WhoisWeekSummary  `json:"weekSummary"`
+	WeeksCovered int               `json:"weeksCovered"`
 }
 
 func newWhoisCommand() *cobra.Command {
+	var weeks int
+
 	cmd := &cobra.Command{
 		Use:   "whois <name-or-email>",
 		Short: "Look up a team member by name or email",
@@ -58,9 +64,16 @@ Matches by case-insensitive substring on name, or exact match on email
   supervisible whois juan
 
   # Exact email match
-  supervisible whois juan@m8l.com --json`,
+  supervisible whois juan@m8l.com --json
+
+  # Cover a four-week window
+  supervisible whois juan --weeks 4 --json`,
 		Args: argsWithUsage(cobra.ExactArgs(1)),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if weeks < 1 || weeks > 12 {
+				return fmt.Errorf("--weeks must be between 1 and 12 (got %d)", weeks)
+			}
+
 			app, err := appFromCommand(cmd)
 			if err != nil {
 				return err
@@ -98,15 +111,16 @@ Matches by case-insensitive substring on name, or exact match on email
 
 			user := matched[0]
 
-			// Get this week's date range
+			// Current week defines the summary; the assignments window stretches over N weeks.
 			weekStart, weekEnd, isoWeek, isoYear, err := parseWeekFlag("")
 			if err != nil {
 				return err
 			}
+			windowEnd := weekStart.AddDate(0, 0, weeks*7-1)
 			startStr := formatDate(weekStart)
-			endStr := formatDate(weekEnd)
+			endStr := formatDate(windowEnd)
 
-			// Fetch assignments for this week
+			// Fetch assignments across the full window
 			assignQuery := url.Values{}
 			assignQuery.Set("user_id", user.ID)
 			assignQuery.Set("start_date", startStr)
@@ -134,17 +148,19 @@ Matches by case-insensitive substring on name, or exact match on email
 				return fmt.Errorf("fetch time-off: %w", err)
 			}
 
-			// Build report
+			// WeekSummary stays scoped to the current week for backward compatibility.
 			report := buildWhoisReport(user, assignments, timeOff, weekStart, weekEnd)
+			report.WeeksCovered = weeks
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(report)
 			}
 
-			return printWhoisProfile(app.Printer(), report, isoWeek, isoYear, weekStart, weekEnd)
+			return printWhoisProfile(app.Printer(), report, isoWeek, isoYear, weekStart, weekEnd, weeks)
 		},
 	}
 
+	cmd.Flags().IntVar(&weeks, "weeks", 1, "Number of weeks to cover (1-12, default 1)")
 	return cmd
 }
 
@@ -184,18 +200,30 @@ func buildWhoisReport(user api.User, assignments []api.Assignment, timeOff []api
 		TimeOff:     make([]WhoisTimeOff, 0, len(timeOff)),
 	}
 
-	assignedHours := 0
+	// WeekSummary.assignedHours stays scoped to weekStart..weekEnd even when
+	// --weeks N pulled a wider assignment window. The full set lands in
+	// report.Assignments so callers can compute their own multi-week aggregates.
+	assignedHoursThisWeek := 0
 	for _, a := range assignments {
+		if a.Hours <= 0 {
+			// Skip zombie rows (hours:0 used as pseudo-delete until DELETE /assignments lands).
+			continue
+		}
 		projName := a.ProjectID
 		if a.Project != nil {
 			projName = a.Project.Name
 		}
 		report.Assignments = append(report.Assignments, WhoisAssignment{
-			Project: projName,
-			Date:    a.Date,
-			Hours:   a.Hours,
+			ID:           a.ID,
+			ProjectID:    a.ProjectID,
+			CapabilityID: output.CoalesceString(a.CapabilityID),
+			Project:      projName,
+			Date:         a.Date,
+			Hours:        a.Hours,
 		})
-		assignedHours += a.Hours
+		if d, err := time.Parse("2006-01-02", a.Date); err == nil && !d.Before(weekStart) && !d.After(weekEnd) {
+			assignedHoursThisWeek += a.Hours
+		}
 	}
 
 	for _, to := range timeOff {
@@ -233,15 +261,15 @@ func buildWhoisReport(user api.User, assignments []api.Assignment, timeOff []api
 
 	available := user.DefaultAvailability - timeOffHours
 	report.WeekSummary = WhoisWeekSummary{
-		AssignedHours:  assignedHours,
+		AssignedHours:  assignedHoursThisWeek,
 		AvailableHours: available,
-		FreeHours:      available - assignedHours,
+		FreeHours:      available - assignedHoursThisWeek,
 	}
 
 	return report
 }
 
-func printWhoisProfile(p *output.Printer, report WhoisReport, isoWeek, isoYear int, weekStart, weekEnd time.Time) error {
+func printWhoisProfile(p *output.Printer, report WhoisReport, isoWeek, isoYear int, weekStart, weekEnd time.Time, weeks int) error {
 	w := p.Stdout()
 	fmt.Fprintf(w, "%s (%s)\n\n", report.User.Name, report.User.Email)
 
@@ -252,16 +280,24 @@ func printWhoisProfile(p *output.Printer, report WhoisReport, isoWeek, isoYear i
 		report.WeekSummary.AvailableHours,
 		report.WeekSummary.FreeHours)
 
-	if len(report.Assignments) > 0 {
-		projectMap := make(map[string]int)
-		for _, a := range report.Assignments {
-			projectMap[a.Project] += a.Hours
+	currentWeekProjects := aggregateByProjectInWindow(report.Assignments, weekStart, weekEnd)
+	if currentWeekProjects != "" {
+		fmt.Fprintf(w, "  Projects: %s\n", currentWeekProjects)
+	}
+
+	if weeks > 1 {
+		fmt.Fprintln(w)
+		fmt.Fprintf(w, "Upcoming Weeks (next %d)\n", weeks-1)
+		for i := 1; i < weeks; i++ {
+			ws := weekStart.AddDate(0, 0, i*7)
+			we := ws.AddDate(0, 0, 6)
+			_, wIso := ws.ISOWeek()
+			projects := aggregateByProjectInWindow(report.Assignments, ws, we)
+			if projects == "" {
+				projects = "—"
+			}
+			fmt.Fprintf(w, "  Week %02d (%s → %s): %s\n", wIso, formatDate(ws), formatDate(we), projects)
 		}
-		parts := make([]string, 0, len(projectMap))
-		for name, hours := range projectMap {
-			parts = append(parts, fmt.Sprintf("%s (%dh)", name, hours))
-		}
-		fmt.Fprintf(w, "  Projects: %s\n", strings.Join(parts, ", "))
 	}
 
 	fmt.Fprintln(w)
@@ -275,4 +311,28 @@ func printWhoisProfile(p *output.Printer, report WhoisReport, isoWeek, isoYear i
 	}
 
 	return nil
+}
+
+// aggregateByProjectInWindow returns "ProjectA (Nh), ProjectB (Mh)" for assignments
+// whose date falls within [start, end] (inclusive). Empty string if no matches.
+func aggregateByProjectInWindow(assignments []WhoisAssignment, start, end time.Time) string {
+	projectMap := make(map[string]int)
+	for _, a := range assignments {
+		d, err := time.Parse("2006-01-02", a.Date)
+		if err != nil {
+			continue
+		}
+		if d.Before(start) || d.After(end) {
+			continue
+		}
+		projectMap[a.Project] += a.Hours
+	}
+	if len(projectMap) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(projectMap))
+	for name, hours := range projectMap {
+		parts = append(parts, fmt.Sprintf("%s (%dh)", name, hours))
+	}
+	return strings.Join(parts, ", ")
 }

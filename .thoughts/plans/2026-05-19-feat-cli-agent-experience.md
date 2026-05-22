@@ -1,6 +1,6 @@
 ---
 type: plan
-status: active
+status: implemented
 tags: [cli, agent, ergonomics, auth, errors, structure, writes, whois, assignments, safety]
 created: 2026-05-19
 supersedes: .thoughts/plans/2026-05-19-feat-agent-safe-writes.md
@@ -473,7 +473,7 @@ Phase 2 sequencing: 7–10 are quick wins shippable in any order. 11 is a buildi
 
 ### Phase 2 — Agent-safe writes
 
-- [ ] **Unit 7: Whois output hygiene — zombie filter + actionable IDs**
+- [x] **Unit 7: Whois output hygiene — zombie filter + actionable IDs**
 
   **Goal:** `whois.assignments[]` omits zero-hour rows and carries the IDs callers need to modify what they just read. (The companion `SetEscapeHTML` fix lives in Phase 1 Unit 1.)
   **Requirements:** R6
@@ -504,7 +504,7 @@ Phase 2 sequencing: 7–10 are quick wins shippable in any order. 11 is a buildi
 
   **Verification:** `./bin/supervisible whois "Juan Méndez" --json | jq '.assignments[].hours' | grep -v 0` shows no zombie rows.
 
-- [ ] **Unit 8: `whois --weeks N` flag**
+- [x] **Unit 8: `whois --weeks N` flag**
 
   **Goal:** Extend `whois` to cover N weeks in one call. Default N=1 (current behavior).
   **Requirements:** R9
@@ -528,7 +528,7 @@ Phase 2 sequencing: 7–10 are quick wins shippable in any order. 11 is a buildi
 
   **Verification:** `./bin/supervisible whois "Juan Méndez" --weeks 4 --json | jq '.assignments | length'` returns more rows than `--weeks 1`.
 
-- [ ] **Unit 9: `schema describe` accepts short noun form**
+- [x] **Unit 9: `schema describe` accepts short noun form**
 
   **Goal:** `schema describe assignments` returns descriptions of `assignments.get` AND `assignments.post`. Unknown noun gives a "did you mean" hint.
   **Requirements:** R7
@@ -550,7 +550,7 @@ Phase 2 sequencing: 7–10 are quick wins shippable in any order. 11 is a buildi
 
   **Verification:** `./bin/supervisible schema describe assignments` prints both endpoints.
 
-- [ ] **Unit 10: Warn on unknown `--params` keys**
+- [x] **Unit 10: Warn on unknown `--params` keys**
 
   **Goal:** When an agent passes `--params '{"startDate":"..."}'` (camelCase typo) the CLI emits a stderr warning via `Aux` rather than silently accepting.
   **Requirements:** R8
@@ -576,7 +576,7 @@ Phase 2 sequencing: 7–10 are quick wins shippable in any order. 11 is a buildi
 
   **Verification:** `./bin/supervisible assignments list --params '{"startDate":"..."}' 2>&1 >/dev/null` shows the warning.
 
-- [ ] **Unit 11: Auto-capability resolver helper**
+- [x] **Unit 11: Auto-capability resolver helper**
 
   **Goal:** Centralize the "most recent capability this user used on this project" lookup as a reusable helper. Used by Units 12 and 13.
   **Requirements:** R10 (foundation)
@@ -604,7 +604,7 @@ Phase 2 sequencing: 7–10 are quick wins shippable in any order. 11 is a buildi
 
   **Verification:** Unit-tested only; verified end-to-end in Unit 12.
 
-- [ ] **Unit 12: `assignments upsert --auto-capability` + `assignments add` compound**
+- [x] **Unit 12: `assignments upsert --auto-capability` + `assignments add` compound**
 
   **Goal:** Two related additions, both built on Phase 1 Unit 6's `App.Execute`:
   - `--auto-capability` flag on existing `upsert` fills in `capabilityId` per item using Unit 11.
@@ -641,7 +641,7 @@ Phase 2 sequencing: 7–10 are quick wins shippable in any order. 11 is a buildi
 
   **Verification:** Replay the original Juan test with `assignments add --auto-capability --dry-run` and confirm the right capability is picked.
 
-- [ ] **Unit 13: Time-off conflict pre-flight in dry-run**
+- [x] **Unit 13: Time-off conflict pre-flight in dry-run**
 
   **Goal:** When `--dry-run` runs on `assignments upsert` or `assignments add`, emit a stderr warning for each item whose `(user, date)` overlaps approved time-off.
   **Requirements:** R12
