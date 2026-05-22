@@ -23,6 +23,7 @@ func newAssignmentsCommand() *cobra.Command {
 		newAssignmentsListCommand(),
 		newAssignmentsUpsertCommand(),
 		newAssignmentsAddCommand(),
+		newAssignmentsMoveCommand(),
 		newAssignmentsDeleteCommand(),
 	)
 
@@ -454,6 +455,262 @@ func findAssignmentHours(ctx context.Context, client *api.Client, userID, projec
 		return r.Hours, r.ID, nil
 	}
 	return 0, "", nil
+}
+
+func newAssignmentsMoveCommand() *cobra.Command {
+	var (
+		fromUserID     string
+		toUserID       string
+		moveHours      int
+		capabilityID   string
+		autoCapability bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "move <assignment-id>",
+		Short: "Move hours from one user to another on the same project",
+		Long: `Move hours from an existing assignment to a different user on the same
+project and date.
+
+Flow:
+  1. Find the source row by ID (scoped by --from-user since the API has no
+     GET /assignments/{id} or id= filter).
+  2. Resolve the target user's capability on the project (--capability-id or
+     --auto-capability from history).
+  3. Upsert the target row (sums with any existing hours on the same date).
+  4. Delete (or decrement) the source row.
+
+Atomicity: add-then-delete. Source is untouched if the target upsert fails.
+If the target upsert succeeds but the source delete/update fails, both rows
+will carry the moved hours; the command exits non-zero with both IDs so you
+can reconcile manually. A server-side PATCH /assignments with diff semantics
+would make this atomic; none exists today.`,
+		Example: `  # Move all of Mariana's hours on row X to Herbert, auto-resolve target capability
+  supervisible assignments move 019d27a4-... \
+    --from-user 0195f31b-... --to-user 0197a204-... --auto-capability --dry-run
+
+  # Move just 4 hours, explicit target capability
+  supervisible assignments move 019d27a4-... \
+    --from-user 0195f31b-... --to-user 0197a204-... \
+    --capability-id 0194b2e1-... --hours 4`,
+		Args: argsWithUsage(cobra.ExactArgs(1)),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			assignmentID := args[0]
+			if err := requireUUIDArg("assignment-id", assignmentID); err != nil {
+				return err
+			}
+			if err := requireUUIDArg("from-user", fromUserID); err != nil {
+				return err
+			}
+			if err := requireUUIDArg("to-user", toUserID); err != nil {
+				return err
+			}
+			if fromUserID == toUserID {
+				return fmt.Errorf("move requires different users; use 'assignments upsert' or 'assignments add' to adjust hours in place")
+			}
+			if cmd.Flags().Changed("hours") && moveHours <= 0 {
+				return fmt.Errorf("--hours must be positive (got %d)", moveHours)
+			}
+
+			app, err := appFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			client, err := app.RequireClient()
+			if err != nil {
+				return err
+			}
+
+			ctx := cmd.Context()
+
+			// 1. Locate the source row by scanning the from-user's assignments.
+			source, err := findAssignmentByID(ctx, client, fromUserID, assignmentID)
+			if err != nil {
+				return err
+			}
+			if source.Hours <= 0 {
+				return fmt.Errorf("source assignment %s has no hours (got %d); nothing to move", assignmentID, source.Hours)
+			}
+
+			hoursToMove := source.Hours
+			if cmd.Flags().Changed("hours") {
+				hoursToMove = moveHours
+			}
+			if hoursToMove > source.Hours {
+				return fmt.Errorf("--hours %d exceeds source's %d hours", hoursToMove, source.Hours)
+			}
+
+			// 2. Resolve target capability.
+			if capabilityID == "" {
+				if !autoCapability {
+					return fmt.Errorf("either --capability-id or --auto-capability is required")
+				}
+				resolver := newCapabilityResolver(client)
+				resolved, resolveErr := resolver.Resolve(ctx, toUserID, source.ProjectID)
+				if resolveErr != nil {
+					return fmt.Errorf("%w\n  Try: supervisible capabilities list --for-project %s --json", resolveErr, source.ProjectID)
+				}
+				capabilityID = resolved
+				app.Printer().Aux("capability resolved for %s/%s: %s", toUserID, source.ProjectID, resolved)
+			} else if err := requireUUIDArg("capability-id", capabilityID); err != nil {
+				return err
+			}
+
+			// 3. Compute target's new hour total (sum with any existing row on the same date).
+			targetExisting, _, err := findAssignmentHours(ctx, client, toUserID, source.ProjectID, capabilityID, source.Date)
+			if err != nil {
+				return err
+			}
+			targetNewHours := targetExisting + hoursToMove
+			sourceNewHours := source.Hours - hoursToMove
+
+			app.Printer().Aux(
+				"move: %dh on %s from %s to %s (project %s, capability %s; target %d→%d, source %d→%d)",
+				hoursToMove, source.Date, fromUserID, toUserID, source.ProjectID, capabilityID,
+				targetExisting, targetNewHours, source.Hours, sourceNewHours,
+			)
+
+			targetItem := map[string]any{
+				"userId":       toUserID,
+				"projectId":    source.ProjectID,
+				"capabilityId": capabilityID,
+				"date":         source.Date,
+				"hours":        targetNewHours,
+			}
+			targetBody := map[string]any{"items": []any{targetItem}}
+
+			preflightTimeOff(ctx, app, targetBody)
+
+			// Dry-run: surface both planned writes on stdout and short-circuit.
+			if app.DryRun() {
+				plan := map[string]any{
+					"target_upsert": targetBody,
+					"source": map[string]any{
+						"assignment_id":  source.ID,
+						"action":         sourceMoveAction(sourceNewHours),
+						"new_hours":      sourceNewHours,
+						"user_id":        source.UserID,
+						"project_id":     source.ProjectID,
+						"capability_id":  derefString(source.CapabilityID),
+						"date":           source.Date,
+						"hours_to_move":  hoursToMove,
+						"original_hours": source.Hours,
+					},
+				}
+				if app.Printer().IsJSON() {
+					return app.PrintData(plan)
+				}
+				app.Printer().Aux("dry-run: target upsert + source %s", sourceMoveAction(sourceNewHours))
+				return nil
+			}
+
+			// 4. ADD first.
+			var upserted []api.Assignment
+			if err := client.Do(ctx, "POST", "/assignments", nil, targetBody, &upserted); err != nil {
+				return fmt.Errorf("target upsert failed (source untouched): %w", err)
+			}
+
+			// 5. Then mutate source — delete row if zero, else upsert the decrement.
+			if sourceNewHours == 0 {
+				if err := client.DeleteAssignment(ctx, source.ID); err != nil {
+					app.Printer().Aux(
+						"PARTIAL FAILURE: target upsert succeeded but source delete failed.\n"+
+							"  target assignment(s): %s\n  source assignment: %s\n  reconcile manually.",
+						summarizeIDs(upserted), source.ID,
+					)
+					return fmt.Errorf("source delete failed after target upsert: %w", err)
+				}
+			} else {
+				sourceCap := derefString(source.CapabilityID)
+				sourceItem := map[string]any{
+					"userId":       source.UserID,
+					"projectId":    source.ProjectID,
+					"capabilityId": sourceCap,
+					"date":         source.Date,
+					"hours":        sourceNewHours,
+				}
+				sourceBody := map[string]any{"items": []any{sourceItem}}
+				if err := client.Do(ctx, "POST", "/assignments", nil, sourceBody, nil); err != nil {
+					app.Printer().Aux(
+						"PARTIAL FAILURE: target upsert succeeded but source decrement failed.\n"+
+							"  target assignment(s): %s\n  source assignment: %s\n  reconcile manually.",
+						summarizeIDs(upserted), source.ID,
+					)
+					return fmt.Errorf("source decrement failed after target upsert: %w", err)
+				}
+			}
+
+			if app.Printer().IsJSON() {
+				return app.PrintData(upserted)
+			}
+			rows := make([][]string, 0, len(upserted))
+			for _, it := range upserted {
+				rows = append(rows, []string{it.ID, it.UserID, it.ProjectID, it.Date, strconv.Itoa(it.Hours)})
+			}
+			return app.Printer().Table([]string{"ID", "USER_ID", "PROJECT_ID", "DATE", "HOURS"}, rows)
+		},
+	}
+
+	cmd.Flags().StringVar(&fromUserID, "from-user", "", "Source user ID (required; scopes the source-row lookup)")
+	cmd.Flags().StringVar(&toUserID, "to-user", "", "Target user ID (required)")
+	cmd.Flags().IntVar(&moveHours, "hours", 0, "Hours to move (default: all of source's hours)")
+	cmd.Flags().StringVar(&capabilityID, "capability-id", "", "Target user's capability on this project (omit to use --auto-capability)")
+	cmd.Flags().BoolVar(&autoCapability, "auto-capability", true, "Resolve target capability from history when --capability-id is empty (default true)")
+	_ = cmd.MarkFlagRequired("from-user")
+	_ = cmd.MarkFlagRequired("to-user")
+	return cmd
+}
+
+// findAssignmentByID scans the given user's assignments to find the row with
+// matching ID. Used because the API has no GET /assignments/{id}.
+func findAssignmentByID(ctx context.Context, client *api.Client, userID, assignmentID string) (api.Assignment, error) {
+	q := url.Values{}
+	q.Set("user_id", userID)
+	q.Set("limit", fetchLimit)
+
+	for offset := 0; offset < 5; offset++ {
+		if offset > 0 {
+			q.Set("offset", strconv.Itoa(offset*200))
+		}
+		var rows []api.Assignment
+		if err := client.Do(ctx, "GET", "/assignments", q, nil, &rows); err != nil {
+			return api.Assignment{}, fmt.Errorf("fetch source assignment: %w", err)
+		}
+		for _, r := range rows {
+			if r.ID == assignmentID {
+				return r, nil
+			}
+		}
+		if len(rows) < 200 {
+			break
+		}
+	}
+	return api.Assignment{}, fmt.Errorf("source assignment %s not found under user %s (scanned up to 1000 rows)", assignmentID, userID)
+}
+
+func sourceMoveAction(sourceNewHours int) string {
+	if sourceNewHours == 0 {
+		return "delete"
+	}
+	return "upsert-decrement"
+}
+
+func summarizeIDs(items []api.Assignment) string {
+	parts := make([]string, 0, len(items))
+	for _, it := range items {
+		parts = append(parts, it.ID)
+	}
+	if len(parts) == 0 {
+		return "(unknown)"
+	}
+	return strings.Join(parts, ", ")
+}
+
+func derefString(p *string) string {
+	if p == nil {
+		return ""
+	}
+	return *p
 }
 
 func newAssignmentsDeleteCommand() *cobra.Command {

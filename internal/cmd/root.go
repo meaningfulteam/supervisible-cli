@@ -372,6 +372,7 @@ func NewRootCommand() *cobra.Command {
 	root.AddCommand(newBenchCommand())
 	root.AddCommand(newWhoisCommand())
 	root.AddCommand(newContextCommand())
+	root.AddCommand(newCapabilitiesCommand())
 
 	return root
 }
