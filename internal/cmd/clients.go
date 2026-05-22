@@ -28,7 +28,10 @@ func newClientsCommand() *cobra.Command {
 }
 
 func newClientsListCommand() *cobra.Command {
-	var limit, offset int
+	var (
+		limit, offset int
+		nameFilter    string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -36,6 +39,9 @@ func newClientsListCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		Example: `  # List active clients
   supervisible clients list
+
+  # Find by company name (case-insensitive substring)
+  supervisible clients list --name "avask" --json
 
   # Paginate JSON for agents
   supervisible clients list --limit 50 --offset 0 --json`,
@@ -64,12 +70,21 @@ func newClientsListCommand() *cobra.Command {
 				return nil
 			}
 
-			if app.Printer().IsJSON() {
-				return app.PrintData(clients)
+			getName := func(c api.ClientResource) string { return c.CompanyName }
+			filtered := filterByName(clients, nameFilter, getName)
+			if nameFilter != "" && len(clients) >= limit {
+				app.Printer().Aux("note: list was paginated at %d rows before filtering by --name; pass --limit if you expect more", limit)
+			}
+			if nameFilter != "" && len(filtered) == 0 {
+				emitNameMissWarning(app.Printer().Aux, "clients", clients, nameFilter, getName)
 			}
 
-			rows := make([][]string, 0, len(clients))
-			for _, c := range clients {
+			if app.Printer().IsJSON() {
+				return app.PrintData(filtered)
+			}
+
+			rows := make([][]string, 0, len(filtered))
+			for _, c := range filtered {
 				rows = append(rows, []string{
 					c.ID,
 					c.CompanyName,
@@ -84,6 +99,7 @@ func newClientsListCommand() *cobra.Command {
 
 	cmd.Flags().IntVar(&limit, "limit", 50, "Pagination limit")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Pagination offset")
+	cmd.Flags().StringVar(&nameFilter, "name", "", "Case-insensitive substring filter on the company name (applied after fetch)")
 	return cmd
 }
 

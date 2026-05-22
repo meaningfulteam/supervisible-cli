@@ -1,6 +1,10 @@
 package cmd
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -93,6 +97,78 @@ func TestBuildWhoisReport_WeekSummaryIgnoresFutureWeeks(t *testing.T) {
 	}
 	if report.WeekSummary.AssignedHours != 12 {
 		t.Fatalf("WeekSummary.AssignedHours = %d, want 12 (only this-week rows count)", report.WeekSummary.AssignedHours)
+	}
+}
+
+func TestEnrichAssignmentsWithClient_PopulatesClient(t *testing.T) {
+	resolver := newProjectClientResolver(nil)
+	resolver.loadFn = func(ctx context.Context) (map[string]*ProjectClient, error) {
+		return map[string]*ProjectClient{
+			"p1": {ID: "c1", Name: "EdVisorly"},
+		}, nil
+	}
+
+	assignments := []WhoisAssignment{
+		{ID: "a1", ProjectID: "p1", Hours: 4},
+		{ID: "a2", ProjectID: "p-unknown", Hours: 2},
+	}
+	enrichAssignmentsWithClient(context.Background(), resolver, assignments, nil)
+
+	if assignments[0].Client == nil || assignments[0].Client.Name != "EdVisorly" {
+		t.Fatalf("expected p1 enriched with EdVisorly, got %+v", assignments[0].Client)
+	}
+	if assignments[1].Client != nil {
+		t.Fatalf("expected p-unknown nil client, got %+v", assignments[1].Client)
+	}
+}
+
+func TestEnrichAssignmentsWithClient_FetchFailureKeepsClientNil(t *testing.T) {
+	resolver := newProjectClientResolver(nil)
+	resolver.loadFn = func(ctx context.Context) (map[string]*ProjectClient, error) {
+		return nil, errors.New("boom")
+	}
+
+	assignments := []WhoisAssignment{
+		{ID: "a1", ProjectID: "p1", Hours: 4},
+		{ID: "a2", ProjectID: "p2", Hours: 2},
+	}
+	calls := 0
+	enrichAssignmentsWithClient(context.Background(), resolver, assignments, func(err error) {
+		calls++
+	})
+
+	if calls != 1 {
+		t.Fatalf("expected callback once, got %d", calls)
+	}
+	for _, a := range assignments {
+		if a.Client != nil {
+			t.Fatalf("expected nil client after fetch failure on %s, got %+v", a.ID, a.Client)
+		}
+	}
+}
+
+func TestWhoisAssignment_JSONOmitsNilClient(t *testing.T) {
+	a := WhoisAssignment{ID: "a1", ProjectID: "p1", Date: "2026-05-21", Hours: 4}
+	raw, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(raw), "\"client\"") {
+		t.Fatalf("expected client field omitted, got %s", raw)
+	}
+}
+
+func TestWhoisAssignment_JSONIncludesClientWhenSet(t *testing.T) {
+	a := WhoisAssignment{
+		ID: "a1", ProjectID: "p1", Date: "2026-05-21", Hours: 4,
+		Client: &WhoisClient{ID: "c1", Name: "EdVisorly"},
+	}
+	raw, err := json.Marshal(a)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"client":{"id":"c1","name":"EdVisorly"}`) {
+		t.Fatalf("expected client embedded, got %s", raw)
 	}
 }
 

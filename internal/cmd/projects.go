@@ -27,7 +27,10 @@ func newProjectsCommand() *cobra.Command {
 }
 
 func newProjectsListCommand() *cobra.Command {
-	var limit, offset int
+	var (
+		limit, offset int
+		nameFilter    string
+	)
 
 	cmd := &cobra.Command{
 		Use:   "list",
@@ -35,6 +38,9 @@ func newProjectsListCommand() *cobra.Command {
 		Args:  cobra.NoArgs,
 		Example: `  # List projects
   supervisible projects list
+
+  # Find by name (case-insensitive substring)
+  supervisible projects list --name "marketplace" --json
 
   # Paginate and project specific fields
   supervisible projects list --limit 50 --fields id,name,status --json`,
@@ -63,12 +69,21 @@ func newProjectsListCommand() *cobra.Command {
 				return nil
 			}
 
-			if app.Printer().IsJSON() {
-				return app.PrintData(projects)
+			getName := func(p api.Project) string { return p.Name }
+			filtered := filterByName(projects, nameFilter, getName)
+			if nameFilter != "" && len(projects) >= limit {
+				app.Printer().Aux("note: list was paginated at %d rows before filtering by --name; pass --limit if you expect more", limit)
+			}
+			if nameFilter != "" && len(filtered) == 0 {
+				emitNameMissWarning(app.Printer().Aux, "projects", projects, nameFilter, getName)
 			}
 
-			rows := make([][]string, 0, len(projects))
-			for _, project := range projects {
+			if app.Printer().IsJSON() {
+				return app.PrintData(filtered)
+			}
+
+			rows := make([][]string, 0, len(filtered))
+			for _, project := range filtered {
 				rows = append(rows, []string{
 					project.ID,
 					project.Name,
@@ -84,6 +99,7 @@ func newProjectsListCommand() *cobra.Command {
 
 	cmd.Flags().IntVar(&limit, "limit", 50, "Pagination limit")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Pagination offset")
+	cmd.Flags().StringVar(&nameFilter, "name", "", "Case-insensitive substring filter on the project name (applied after fetch)")
 	return cmd
 }
 
