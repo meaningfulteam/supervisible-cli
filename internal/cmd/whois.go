@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -13,13 +14,19 @@ import (
 
 // --- Output types for whois command ---
 
+type WhoisClient struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 type WhoisAssignment struct {
-	ID           string `json:"id"`
-	ProjectID    string `json:"projectId"`
-	CapabilityID string `json:"capabilityId"`
-	Project      string `json:"project"`
-	Date         string `json:"date"`
-	Hours        int    `json:"hours"`
+	ID           string       `json:"id"`
+	ProjectID    string       `json:"projectId"`
+	CapabilityID string       `json:"capabilityId"`
+	Project      string       `json:"project"`
+	Client       *WhoisClient `json:"client,omitempty"`
+	Date         string       `json:"date"`
+	Hours        int          `json:"hours"`
 }
 
 type WhoisTimeOff struct {
@@ -151,6 +158,15 @@ Matches by case-insensitive substring on name, or exact match on email
 			// WeekSummary stays scoped to the current week for backward compatibility.
 			report := buildWhoisReport(user, assignments, timeOff, weekStart, weekEnd)
 			report.WeeksCovered = weeks
+
+			// Enrich assignments with their client linkage (best-effort).
+			// Skip the bulk projects fetch entirely when there's nothing to enrich.
+			if len(report.Assignments) > 0 {
+				resolver := newProjectClientResolver(client)
+				enrichAssignmentsWithClient(ctx, resolver, report.Assignments, func(err error) {
+					app.Printer().Aux("warning: could not load project/client map; client field omitted (%v)", err)
+				})
+			}
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(report)
@@ -311,6 +327,19 @@ func printWhoisProfile(p *output.Printer, report WhoisReport, isoWeek, isoYear i
 	}
 
 	return nil
+}
+
+// enrichAssignmentsWithClient sets a.Client for every assignment whose project is
+// resolvable. Fail-soft: if the resolver's bulk fetch fails, onError fires once
+// and every assignment keeps Client=nil.
+func enrichAssignmentsWithClient(ctx context.Context, resolver *projectClientResolver, assignments []WhoisAssignment, onError func(error)) {
+	for i := range assignments {
+		c := resolver.Resolve(ctx, assignments[i].ProjectID, onError)
+		if c == nil {
+			continue
+		}
+		assignments[i].Client = &WhoisClient{ID: c.ID, Name: c.Name}
+	}
 }
 
 // aggregateByProjectInWindow returns "ProjectA (Nh), ProjectB (Mh)" for assignments
