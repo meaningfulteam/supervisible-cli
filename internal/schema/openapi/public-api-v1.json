@@ -934,6 +934,45 @@
         }
       }
     },
+    "/assignments/{assignment_id}": {
+      "delete": {
+        "summary": "Delete an assignment",
+        "description": "Permanently removes a single assignment row by ID. Returns 204 No Content on success, 404 if the assignment does not exist or belongs to a different org. Related notifications are cleaned in the same transaction; actual hours on the same (user, project, capability) are intentionally NOT touched.",
+        "tags": ["assignments"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "write:assignments",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "assignment_id",
+            "required": true,
+            "description": "Assignment ID.",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful response (no content)"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          },
+          "404": {
+            "description": "Not found"
+          }
+        }
+      }
+    },
     "/actual-hours": {
       "get": {
         "summary": "List actual hours",

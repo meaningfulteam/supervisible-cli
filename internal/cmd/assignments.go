@@ -315,7 +315,9 @@ func newAssignmentsAddCommand() *cobra.Command {
 assignment. Fetches the current row, computes new = existing + delta, and upserts.
 
 If no row exists, creates one with hours=delta. If the resulting value would go
-negative, the command fails before writing.
+negative, the command fails before writing. If the resulting value is exactly 0
+on an existing row, the row is deleted (DELETE /assignments/{id}) instead of
+being upserted to hours:0.
 
 Race condition: another writer can modify the row between read and write. For
 a single-actor CLI this is acceptable; document the trade-off if scripting.`,
@@ -379,8 +381,31 @@ a single-actor CLI this is acceptable; document the trade-off if scripting.`,
 			if newHours < 0 {
 				return fmt.Errorf("computed hours would be negative (%d + %d = %d); refusing to write", existingHours, delta, newHours)
 			}
+
+			// Reaching exactly 0 on an existing row → delete the row server-side
+			// instead of upserting hours:0 (which would leave a zombie row that
+			// list endpoints / aggregators have to filter out).
 			if existingID != "" && newHours == 0 {
-				return fmt.Errorf("computed hours = 0 would zombify the row (DELETE /assignments not yet supported by server); use `assignments delete` instead")
+				app.Printer().Aux("assignments add: %s %s %s %dh + %dh = 0h → deleting assignment %s", userID, projectID, date, existingHours, delta, existingID)
+
+				plan := RequestPlan{
+					CommandPath:   "assignments add",
+					Method:        "DELETE",
+					Endpoint:      "/assignments/" + existingID,
+					RequiredScope: app.RequiredScope("DELETE", "/assignments/{assignment_id}"),
+				}
+				if app.MaybeDryRun(plan) {
+					return nil
+				}
+
+				if err := client.DeleteAssignment(cmd.Context(), existingID); err != nil {
+					return err
+				}
+				if app.Printer().IsJSON() {
+					return app.PrintData(map[string]string{"id": existingID, "deleted": "true"})
+				}
+				app.Printer().Aux("Deleted assignment: %s", existingID)
+				return nil
 			}
 
 			app.Printer().Aux("assignments add: %s %s %s %dh + %dh = %dh", userID, projectID, date, existingHours, delta, newHours)
