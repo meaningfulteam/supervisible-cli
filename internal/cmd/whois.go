@@ -222,7 +222,10 @@ func buildWhoisReport(user api.User, assignments []api.Assignment, timeOff []api
 	assignedHoursThisWeek := 0
 	for _, a := range assignments {
 		if a.Hours <= 0 {
-			// Skip zombie rows (hours:0 used as pseudo-delete until DELETE /assignments lands).
+			// Defensive filter for legacy zombie rows (hours:0 from before
+			// DELETE /assignments/{id} was supported). New writes go via
+			// the real DELETE endpoint; this still guards against pre-existing
+			// rows the server may surface.
 			continue
 		}
 		projName := a.ProjectID

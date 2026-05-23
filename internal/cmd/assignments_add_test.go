@@ -21,6 +21,7 @@ type addServer struct {
 	server         *httptest.Server
 	existing       []api.Assignment // returned by GET /assignments
 	gotUpsertBody  atomic.Value     // last POST body (string)
+	gotDeletePath  atomic.Value     // last DELETE path (string)
 	upsertResponse []api.Assignment
 }
 
@@ -40,6 +41,9 @@ func newAddServer(t *testing.T, existing []api.Assignment) *addServer {
 			_, _ = r.Body.Read(body)
 			s.gotUpsertBody.Store(string(body))
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": s.upsertResponse})
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/assignments/"):
+			s.gotDeletePath.Store(r.URL.Path)
+			w.WriteHeader(http.StatusNoContent)
 		default:
 			http.NotFound(w, r)
 		}
@@ -132,6 +136,70 @@ func TestAssignmentsAdd_NegativeResultRefusesToWrite(t *testing.T) {
 	}
 	if body, _ := s.gotUpsertBody.Load().(string); body != "" {
 		t.Fatalf("expected no upsert when result would be negative, got body: %q", body)
+	}
+}
+
+func TestAssignmentsAdd_ZeroResultDeletesExistingRow(t *testing.T) {
+	cap := addCapID
+	existing := []api.Assignment{
+		{ID: "existing-id", UserID: addUserID, ProjectID: addProjectID, CapabilityID: &cap, Date: "2026-05-24", Hours: 2},
+	}
+	s := newAddServer(t, existing)
+	defer s.server.Close()
+	setupAddEnv(t, s.server)
+
+	_, stderr, err := executeCLI(t,
+		"--config", testConfigPath(t),
+		"assignments", "add",
+		"--user-id", addUserID,
+		"--project-id", addProjectID,
+		"--capability-id", addCapID,
+		"--date", "2026-05-24",
+		"--hours", "-2",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if body, _ := s.gotUpsertBody.Load().(string); body != "" {
+		t.Fatalf("expected no upsert when result is 0, got body: %q", body)
+	}
+	deletePath, _ := s.gotDeletePath.Load().(string)
+	if !strings.HasSuffix(deletePath, "/assignments/existing-id") {
+		t.Fatalf("expected DELETE /assignments/existing-id, got: %q", deletePath)
+	}
+	if !strings.Contains(stderr, "deleting assignment existing-id") {
+		t.Fatalf("expected delete summary on stderr, got: %q", stderr)
+	}
+}
+
+func TestAssignmentsAdd_ZeroResultDryRunSkipsDelete(t *testing.T) {
+	cap := addCapID
+	existing := []api.Assignment{
+		{ID: "existing-id", UserID: addUserID, ProjectID: addProjectID, CapabilityID: &cap, Date: "2026-05-24", Hours: 2},
+	}
+	s := newAddServer(t, existing)
+	defer s.server.Close()
+	setupAddEnv(t, s.server)
+
+	_, stderr, err := executeCLI(t,
+		"--config", testConfigPath(t),
+		"--dry-run",
+		"assignments", "add",
+		"--user-id", addUserID,
+		"--project-id", addProjectID,
+		"--capability-id", addCapID,
+		"--date", "2026-05-24",
+		"--hours", "-2",
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if path, _ := s.gotDeletePath.Load().(string); path != "" {
+		t.Fatalf("expected no DELETE on dry-run, got: %q", path)
+	}
+	if !strings.Contains(stderr, "Dry-run: DELETE /assignments/existing-id") {
+		t.Fatalf("expected dry-run preview, got: %q", stderr)
 	}
 }
 
