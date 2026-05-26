@@ -106,19 +106,28 @@ These compound commands answer real questions in a single call — no chaining r
 **assignments** — Manage project assignments
 
 - `supervisible assignments list` — List assignments (filter: `--user-id`, `--project-id`, `--start-date`, `--end-date`)
-- `supervisible assignments upsert` — Create or update assignments (single via flags, bulk via `--payload`)
-- `supervisible assignments delete <id>` — Delete an assignment
+- `supervisible assignments upsert` — Create or update assignments (single via flags, bulk via `--payload '{"items":[...]}'`)
+- `supervisible assignments add` — Read-modify-write one row by `(user, project, capability, date)`. Auto-deletes the row when result is 0.
+- `supervisible assignments move <id> --to-user <id>` — Atomic server-side move to another user (same project, same date). Use `--capability-id` to set the target capability; `--hours` to move a subset.
+- `supervisible assignments remove-from-project --user-id <id> --project-id <id>` — Remove a user's future assignments from a project. Defaults to "next week onward" so the current week stays. Override with `--since YYYY-MM-DD` to wipe from a backdated cutoff.
+- `supervisible assignments delete <id> [<id>...]` — Delete one or more rows in a single CLI call (one classifier check, N HTTP DELETEs).
+
+**capabilities** — Inspect the org's capability catalog
+
+- `supervisible capabilities list` — All capabilities for the caller's org
+- `supervisible capabilities list --for-project <id>` — Only those attached to a specific project. Recovery path when `--auto-capability` fails on a user with no prior history.
 
 **actual-hours** — Track logged hours
 
 - `supervisible actual-hours list` — List logged hours (same filters as assignments)
 - `supervisible actual-hours upsert` — Log hours (single or bulk)
-- `supervisible actual-hours delete <id>` — Delete logged hours
+- `supervisible actual-hours delete <id> [<id>...]` — Delete one or more rows in a single call
 
 **time-off** — Manage time-off requests
 
 - `supervisible time-off list` — List requests (filter: `--user-id`, `--status`)
-- `supervisible time-off create` — Create a request (requires `--user-id`, `--time-off-type-id`, `--start-date`, `--end-date`, `--reason`)
+- `supervisible time-off create --type-name "Vacation"` — Resolve type name → ID via API and create the request
+- `supervisible time-off create --time-off-type-id <uuid>` — Create with explicit type ID
 - `supervisible time-off update <id>` — Update a request
 - `supervisible time-off delete <id>` — Delete a request
 - `supervisible time-off approve <id>` — Approve a request
@@ -194,6 +203,66 @@ supervisible assignments upsert --dry-run --json --payload '{
     {"userId": "<ID>", "projectId": "<ID>", "date": "2026-05-23", "hours": 8}
   ]
 }'
+```
+
+### Remove someone from a project — "X is no longer on Y"
+
+```bash
+# 1. Find Mariana's user ID and EdVisorly's project ID
+supervisible whois Mariana --json | jq '.user.id, .assignments[].client.name + " / " + .assignments[].project'
+
+# 2. Preview the cleanup. Default cutoff = next-week Sunday; current week stays.
+supervisible assignments remove-from-project \
+  --user-id <user-id> --project-id <project-id> \
+  --dry-run --json
+
+# 3. Execute when the plan looks right
+supervisible assignments remove-from-project \
+  --user-id <user-id> --project-id <project-id>
+
+# Backdated: "they actually stopped 2 months ago"
+supervisible assignments remove-from-project \
+  --user-id <user-id> --project-id <project-id> \
+  --since 2026-04-01
+```
+
+### Move hours from one teammate to another (same project, same date)
+
+```bash
+# 1. Find the source assignment row
+supervisible whois Juan --json | jq '.assignments[] | select(.project == "Web Redesign")'
+
+# 2. Atomic move — server-side, no TOCTOU
+supervisible assignments move <source-row-id> \
+  --to-user <target-user-id> \
+  --capability-id <target-cap> \
+  --hours 4    # optional; defaults to all source hours
+
+# Use `capabilities list --for-project <project-id>` if you don't know
+# the target's capability ID on that project yet.
+```
+
+### Recovery: --auto-capability failed
+
+When `assignments add --auto-capability` fails for a user with no prior history on a project, the canonical recovery path is one CLI call:
+
+```bash
+supervisible capabilities list --for-project <project-id> --json
+# Pick an ID from the result, then:
+supervisible assignments add \
+  --user-id <id> --project-id <id> \
+  --capability-id <picked-id> \
+  --date 2026-05-31 --hours 10
+```
+
+### Create a time-off request without looking up the type ID
+
+```bash
+# --type-name resolves to ID via the API (one extra GET, then POST)
+supervisible time-off create \
+  --user-id <user-id> --type-name Vacation \
+  --start-date 2026-07-15 --end-date 2026-07-19 \
+  --reason "Family trip"
 ```
 
 ## Auth Setup

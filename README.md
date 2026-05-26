@@ -79,23 +79,39 @@ supervisible me --json
 | Command | Description |
 |---------|-------------|
 | `supervisible assignments list [filters]` | List assignments |
-| `supervisible assignments upsert --payload '\{"items":[...]\}'` | Bulk upsert assignments |
-| `supervisible assignments upsert --file payload.json` | Bulk upsert from file |
+| `supervisible assignments upsert --payload '\{"items":[...]\}'` | Bulk upsert |
+| `supervisible assignments add [flags]` | Read-modify-write a single row (auto-deletes when hours go to 0) |
+| `supervisible assignments move <id> --to-user <id>` | Atomic server-side move to another user (same project) |
+| `supervisible assignments remove-from-project --user-id <id> --project-id <id> [--since YYYY-MM-DD]` | Remove a user's future assignments from a project (defaults to next week onward) |
+| `supervisible assignments delete <id> [<id>...]` | Delete one or more rows in a single call |
+
+### Capabilities
+
+| Command | Description |
+|---------|-------------|
+| `supervisible capabilities list [--for-project <id>]` | List org capabilities; with `--for-project`, only those attached to that project |
+
+### Time-off Types
+
+| Command | Description |
+|---------|-------------|
+| `supervisible schema describe "GET /time-off-types"` | (Available via API; the CLI's `time-off create --type-name` uses it internally to resolve names → IDs) |
 
 ### Actual Hours
 
 | Command | Description |
 |---------|-------------|
 | `supervisible actual-hours list [filters]` | List logged hours |
-| `supervisible actual-hours upsert --payload '\{"items":[...]\}'` | Bulk upsert hours |
-| `supervisible actual-hours upsert --file payload.json` | Bulk upsert from file |
+| `supervisible actual-hours upsert --payload '\{"items":[...]\}'` | Bulk upsert |
+| `supervisible actual-hours delete <id> [<id>...]` | Delete one or more rows in a single call |
 
 ### Time Off
 
 | Command | Description |
 |---------|-------------|
 | `supervisible time-off list [filters]` | List time-off requests |
-| `supervisible time-off create [flags]` | Create a request |
+| `supervisible time-off create --type-name "Vacation" [flags]` | Create a request (resolves type name to ID via API) |
+| `supervisible time-off create --time-off-type-id <uuid> [flags]` | Create a request with an explicit type ID |
 | `supervisible time-off update <request-id> [flags]` | Update a request |
 | `supervisible time-off delete <request-id>` | Delete a request |
 | `supervisible time-off approve <request-id>` | Approve a request |
@@ -180,7 +196,19 @@ Schema source defaults to the embedded OpenAPI spec. Override with:
 
 ## Agent-Safe Usage
 
-`--json` + `--dry-run` + `--fields` make the CLI safe and predictable for automation:
+`--json` + `--dry-run` + `--fields` make the CLI safe and predictable for automation. The CLI also surfaces server-side soft warnings (e.g. `time_off_overlap` on assignment writes) to stderr automatically — `--json` consumers see them without polluting stdout:
+
+```text
+$ supervisible assignments upsert --payload '{...}' --json
+[ ... rows ... ]                                  # stdout
+warning: time_off_overlap — Assignment on …       # stderr
+```
+
+### One CLI call, one classifier check
+
+Bulk operations (`assignments delete <id1> <id2> ...`, `assignments remove-from-project ...`, `assignments upsert --payload '{"items":[...]}'`) fan out N HTTP calls from a single bash invocation. From a Claude Code / Codex / OpenClaw harness's POV that's one operation with one auto-mode approval, not a loop over destructive commands. Pair with `--dry-run` to preview the full plan.
+
+### Standard patterns
 
 ```bash
 # Compact, filtered output
