@@ -95,6 +95,67 @@ func TestAppExecute_RealCallHitsServerOnce(t *testing.T) {
 	}
 }
 
+func TestAppExecute_SurfacesServerWarningsToStderr(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": [{"id":"a1"}],
+			"warnings": [
+				{"code":"time_off_overlap","message":"Assignment on 2026-07-07 for user X overlaps approved PTO."},
+				{"code":"time_off_overlap","message":"Assignment on 2026-07-08 for user X overlaps approved PTO."}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	app, _, stderr := newTestApp(t, server.URL, false, false)
+
+	var out []map[string]any
+	executed, err := app.Execute(context.Background(), ExecuteOpts{
+		CommandPath: "assignments upsert",
+		Method:      "POST",
+		Endpoint:    "/assignments",
+		Out:         &out,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if !executed {
+		t.Fatalf("expected executed=true")
+	}
+	got := stderr.String()
+	if !strings.Contains(got, "warning: time_off_overlap — Assignment on 2026-07-07") {
+		t.Fatalf("expected first warning on stderr, got: %q", got)
+	}
+	if !strings.Contains(got, "warning: time_off_overlap — Assignment on 2026-07-08") {
+		t.Fatalf("expected second warning on stderr, got: %q", got)
+	}
+}
+
+func TestAppExecute_QuietWhenNoWarnings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[{"id":"a1"}]}`))
+	}))
+	defer server.Close()
+
+	app, _, stderr := newTestApp(t, server.URL, false, false)
+
+	var out []map[string]any
+	_, err := app.Execute(context.Background(), ExecuteOpts{
+		CommandPath: "assignments upsert",
+		Method:      "POST",
+		Endpoint:    "/assignments",
+		Out:         &out,
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if got := stderr.String(); strings.Contains(got, "warning:") {
+		t.Fatalf("expected no warning lines on stderr, got: %q", got)
+	}
+}
+
 func TestAppExecute_PropagatesAPIError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
