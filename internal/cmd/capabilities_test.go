@@ -6,121 +6,152 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/supervisible/supervisible-cli/internal/api"
 )
 
-func TestAggregateDerivedCapabilities_GroupsAndCounts(t *testing.T) {
-	a := "cap-a"
-	b := "cap-b"
-	rows := []api.Assignment{
-		{ID: "1", CapabilityID: &a, Hours: 4, Capability: &api.ExpandedCapability{ID: "cap-a", Name: "PM"}},
-		{ID: "2", CapabilityID: &a, Hours: 8, Capability: &api.ExpandedCapability{ID: "cap-a", Name: "PM"}},
-		{ID: "3", CapabilityID: &b, Hours: 2, Capability: &api.ExpandedCapability{ID: "cap-b", Name: "Design"}},
-	}
-	got := aggregateDerivedCapabilities(rows)
-	if len(got) != 2 {
-		t.Fatalf("expected 2 derived rows, got %d: %+v", len(got), got)
-	}
-	if got[0].CapabilityID != "cap-a" || got[0].UsageCount != 2 || got[0].Name != "PM" {
-		t.Fatalf("expected cap-a/PM/2 first, got %+v", got[0])
-	}
-	for _, d := range got {
-		if d.Source != capabilitySourceDerived {
-			t.Fatalf("expected source=%s, got %q", capabilitySourceDerived, d.Source)
-		}
-	}
+// fakeCapabilitiesServer mirrors GET /capabilities including the
+// for_project filter that PR #885 added: when set, only rows tagged with
+// that projectID are returned.
+type fakeCapabilitiesServer struct {
+	server     *httptest.Server
+	capsByProj map[string][]map[string]any // projectID -> rows; "" key = unfiltered org-wide
+	gotQuery   string
 }
 
-func TestAggregateDerivedCapabilities_SkipsZombieAndNullCap(t *testing.T) {
-	a := "cap-a"
-	rows := []api.Assignment{
-		{ID: "zombie", CapabilityID: &a, Hours: 0, Capability: &api.ExpandedCapability{ID: "cap-a", Name: "PM"}},
-		{ID: "nilcap", CapabilityID: nil, Hours: 4},
-		{ID: "live", CapabilityID: &a, Hours: 4, Capability: &api.ExpandedCapability{ID: "cap-a", Name: "PM"}},
-	}
-	got := aggregateDerivedCapabilities(rows)
-	if len(got) != 1 || got[0].UsageCount != 1 {
-		t.Fatalf("expected single cap-a row with usage 1, got %+v", got)
-	}
-}
-
-func TestCapabilitiesList_DerivedWarningOnNonEmpty(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+func newCapabilitiesServer(t *testing.T, capsByProj map[string][]map[string]any) *fakeCapabilitiesServer {
+	t.Helper()
+	s := &fakeCapabilitiesServer{capsByProj: capsByProj}
+	s.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[
-			{"id":"a1","userId":"u1","projectId":"019d27a4-0000-7000-8000-000000000000","capabilityId":"cap-1","date":"2026-05-21","hours":4,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","capability":{"id":"cap-1","name":"Project Management"}}
-		]}`))
+		if r.Method != http.MethodGet || !strings.HasSuffix(r.URL.Path, "/capabilities") {
+			http.NotFound(w, r)
+			return
+		}
+		s.gotQuery = r.URL.RawQuery
+		proj := r.URL.Query().Get("for_project")
+		rows, ok := s.capsByProj[proj]
+		if !ok {
+			rows = []map[string]any{}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": rows})
 	}))
-	defer server.Close()
+	return s
+}
+
+func capRow(id, name string) map[string]any {
+	return map[string]any{
+		"id":          id,
+		"name":        name,
+		"description": nil,
+		"createdAt":   "2026-01-01T00:00:00Z",
+		"updatedAt":   "2026-01-01T00:00:00Z",
+	}
+}
+
+func TestCapabilitiesList_UnfilteredHitsServer(t *testing.T) {
+	s := newCapabilitiesServer(t, map[string][]map[string]any{
+		"": {capRow("c1", "Project Management"), capRow("c2", "Design")},
+	})
+	defer s.server.Close()
 
 	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
-	t.Setenv("SUPERVISIBLE_BASE_URL", server.URL)
+	t.Setenv("SUPERVISIBLE_BASE_URL", s.server.URL)
 
-	stdout, stderr, err := executeCLI(t,
+	stdout, _, err := executeCLI(t,
 		"--config", testConfigPath(t),
 		"--json",
 		"capabilities", "list",
-		"--for-project", "019d27a4-0000-7000-8000-000000000000",
 	)
 	if err != nil {
-		t.Fatalf("command failed: %v\n%s", err, stderr)
+		t.Fatalf("command failed: %v", err)
 	}
-	if !strings.Contains(stderr, "derived from assignment history") {
-		t.Fatalf("expected derived-view warning on stderr, got: %q", stderr)
-	}
-
 	var rows []map[string]any
 	if err := json.Unmarshal([]byte(stdout), &rows); err != nil {
 		t.Fatalf("invalid json: %v\n%s", err, stdout)
 	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 derived row, got %d: %v", len(rows), rows)
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 org-wide rows, got %d: %v", len(rows), rows)
 	}
-	if rows[0]["source"] != capabilitySourceDerived {
-		t.Fatalf("expected source=%s, got %v", capabilitySourceDerived, rows[0]["source"])
-	}
-	if rows[0]["name"] != "Project Management" {
-		t.Fatalf("expected expanded capability name, got %v", rows[0]["name"])
+	if strings.Contains(s.gotQuery, "for_project=") {
+		t.Fatalf("expected no for_project param when --for-project absent, got query: %q", s.gotQuery)
 	}
 }
 
-func TestCapabilitiesList_EmptyEmitsInformationalNote(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[]}`))
-	}))
-	defer server.Close()
+func TestCapabilitiesList_ForProjectPassesParamThrough(t *testing.T) {
+	const projID = "019c885e-576c-7a7d-ba22-13a3778fb8cb"
+	s := newCapabilitiesServer(t, map[string][]map[string]any{
+		projID: {capRow("c-on-proj", "Project Management")},
+	})
+	defer s.server.Close()
 
 	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
-	t.Setenv("SUPERVISIBLE_BASE_URL", server.URL)
+	t.Setenv("SUPERVISIBLE_BASE_URL", s.server.URL)
 
 	stdout, stderr, err := executeCLI(t,
 		"--config", testConfigPath(t),
 		"--json",
 		"capabilities", "list",
-		"--for-project", "019d27a4-0000-7000-8000-000000000000",
+		"--for-project", projID,
 	)
 	if err != nil {
 		t.Fatalf("command failed: %v\n%s", err, stderr)
 	}
-	if !strings.Contains(stderr, "no capabilities found via assignment history") {
-		t.Fatalf("expected informational note on empty, got: %q", stderr)
+	if !strings.Contains(s.gotQuery, "for_project="+projID) {
+		t.Fatalf("expected for_project param in query, got: %q", s.gotQuery)
 	}
-	if strings.TrimSpace(stdout) != "[]" {
-		t.Fatalf("expected empty array stdout, got: %q", stdout)
+	var rows []map[string]any
+	if err := json.Unmarshal([]byte(stdout), &rows); err != nil {
+		t.Fatalf("invalid json: %v\n%s", err, stdout)
+	}
+	if len(rows) != 1 || rows[0]["id"] != "c-on-proj" {
+		t.Fatalf("expected single Project Management row, got %v", rows)
+	}
+	// Critical: no more "derived from assignment history" warning.
+	if strings.Contains(stderr, "derived from") {
+		t.Fatalf("expected no derived-view warning, got stderr: %q", stderr)
+	}
+	// Critical: no more "source" field in the JSON.
+	if _, hasSource := rows[0]["source"]; hasSource {
+		t.Fatalf("expected no 'source' field in canonical output, got %v", rows[0])
 	}
 }
 
-func TestCapabilitiesList_RequiresForProject(t *testing.T) {
+func TestCapabilitiesList_EmptyForProjectShowsNote(t *testing.T) {
+	const projID = "019c885e-576c-7a7d-ba22-13a3778fb8cb"
+	s := newCapabilitiesServer(t, map[string][]map[string]any{
+		projID: {}, // server returns empty for this project
+	})
+	defer s.server.Close()
+
 	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
-	t.Setenv("SUPERVISIBLE_BASE_URL", "http://example.invalid")
+	t.Setenv("SUPERVISIBLE_BASE_URL", s.server.URL)
+
+	stdout, stderr, err := executeCLI(t,
+		"--config", testConfigPath(t),
+		"--json",
+		"capabilities", "list",
+		"--for-project", projID,
+	)
+	if err != nil {
+		t.Fatalf("command failed: %v", err)
+	}
+	if strings.TrimSpace(stdout) != "[]" {
+		t.Fatalf("expected stdout=[] on empty result, got: %q", stdout)
+	}
+	if !strings.Contains(stderr, "no capabilities attached to project") {
+		t.Fatalf("expected per-project empty note, got: %q", stderr)
+	}
+}
+
+func TestCapabilitiesList_RejectsBadProjectUUID(t *testing.T) {
+	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
+	t.Setenv("SUPERVISIBLE_BASE_URL", "http://localhost:9999")
 
 	_, _, err := executeCLI(t,
 		"--config", testConfigPath(t),
 		"capabilities", "list",
+		"--for-project", "not-a-uuid",
 	)
 	if err == nil {
-		t.Fatalf("expected error when --for-project missing")
+		t.Fatalf("expected error for bad --for-project UUID")
 	}
 }

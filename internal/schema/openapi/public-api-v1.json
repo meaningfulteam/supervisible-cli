@@ -1734,6 +1734,121 @@
           }
         }
       }
+    },
+    "/capabilities": {
+      "get": {
+        "summary": "List capabilities",
+        "description": "Returns the organization's capabilities. Pass for_project=<uuid> to filter to the capabilities attached to a single project — the recovery path when an agent's --auto-capability resolution fails on a user with no prior history on the project.",
+        "tags": ["capabilities"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "read:capabilities",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Number of rows (default 50, max 200).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "for_project",
+            "required": false,
+            "description": "Filter to capabilities attached to this project (joined through project_capabilities).",
+            "schema": {
+              "type": "string",
+              "description": "UUID"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": []
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request"
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          }
+        }
+      }
+    },
+    "/time-off-types": {
+      "get": {
+        "summary": "List time off types",
+        "description": "Returns the active (non-archived) time-off types defined for the caller's organization. Use to resolve a type name into a timeOffTypeId before creating time-off requests.",
+        "tags": ["time-off-types"],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "x-required-scope": "read:time_off_types",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "description": "Number of rows (default 50, max 200).",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "in": "query",
+            "name": "offset",
+            "required": false,
+            "description": "Pagination offset (default 0).",
+            "schema": {
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful response",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": []
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized"
+          },
+          "403": {
+            "description": "Missing required scope"
+          }
+        }
+      }
     }
   }
 }
