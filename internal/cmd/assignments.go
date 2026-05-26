@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +26,7 @@ func newAssignmentsCommand() *cobra.Command {
 		newAssignmentsUpsertCommand(),
 		newAssignmentsAddCommand(),
 		newAssignmentsMoveCommand(),
+		newAssignmentsRemoveFromProjectCommand(),
 		newAssignmentsDeleteCommand(),
 	)
 
@@ -605,6 +608,151 @@ func numberField(m map[string]any, key string) int {
 	default:
 		return 0
 	}
+}
+
+func newAssignmentsRemoveFromProjectCommand() *cobra.Command {
+	var (
+		userID          string
+		projectID       string
+		since           string
+		continueOnError bool
+	)
+
+	cmd := &cobra.Command{
+		Use:   "remove-from-project",
+		Short: "Remove a user's future assignments from a project",
+		Long: `Delete the assignments a user has on a project from a cutoff date onward,
+in a single CLI call (one server-side list + N batched deletes).
+
+Default cutoff is the Sunday that starts NEXT week — i.e., the current week's
+assignment is preserved (work may already be in progress) and only future
+weeks are wiped. Pass --since YYYY-MM-DD to override the cutoff (use, e.g.,
+the historical Sunday when someone actually left the project).
+
+Past assignments (rows with date strictly before the cutoff) are never
+touched. Use 'assignments delete <id>...' to remove a specific row.`,
+		Example: `  # "Mariana is no longer on EdVisorly" — default cutoff: next week onwards
+  supervisible assignments remove-from-project \
+    --user-id 019cf76c-... --project-id 019d279a-...
+
+  # "Juan actually stopped contributing on 2026-04-01" — wipe from a backdated cutoff
+  supervisible assignments remove-from-project \
+    --user-id 0194... --project-id 0194... --since 2026-04-01
+
+  # Preview without writing
+  supervisible assignments remove-from-project \
+    --user-id 0194... --project-id 0194... --dry-run --json`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			if err := requireUUIDArg("user-id", userID); err != nil {
+				return err
+			}
+			if err := requireUUIDArg("project-id", projectID); err != nil {
+				return err
+			}
+			if cmd.Flags().Changed("since") {
+				if err := validateOptionalDate("since", since); err != nil {
+					return err
+				}
+			} else {
+				since = nextWeekSunday(time.Now())
+			}
+
+			app, err := appFromCommand(cmd)
+			if err != nil {
+				return err
+			}
+			client, err := app.RequireClient()
+			if err != nil {
+				return err
+			}
+
+			ctx := cmd.Context()
+			rows, err := listAssignmentsForRemoval(ctx, client, userID, projectID, since)
+			if err != nil {
+				return err
+			}
+			if len(rows) == 0 {
+				app.Printer().Aux("no future assignments found for user %s on project %s since %s", userID, projectID, since)
+				if app.Printer().IsJSON() {
+					return app.PrintData([]batchDeleteResult{})
+				}
+				return nil
+			}
+
+			totalHours := 0
+			ids := make([]string, 0, len(rows))
+			dates := make([]string, 0, len(rows))
+			for _, r := range rows {
+				ids = append(ids, r.ID)
+				dates = append(dates, r.Date)
+				totalHours += r.Hours
+			}
+			sort.Strings(dates)
+			app.Printer().Aux(
+				"remove-from-project: %d rows, %dh total, dates %s → %s, cutoff since=%s",
+				len(rows), totalHours, dates[0], dates[len(dates)-1], since,
+			)
+
+			if app.DryRun() {
+				return previewBatchDelete(
+					app,
+					"assignments remove-from-project",
+					"/assignments/{assignment_id}",
+					"/assignments/",
+					app.RequiredScope("DELETE", "/assignments/{assignment_id}"),
+					ids,
+				)
+			}
+
+			return runBatchDelete(ctx, app, "assignment", ids, client.DeleteAssignment, continueOnError)
+		},
+	}
+
+	cmd.Flags().StringVar(&userID, "user-id", "", "User ID (required)")
+	cmd.Flags().StringVar(&projectID, "project-id", "", "Project ID (required)")
+	cmd.Flags().StringVar(&since, "since", "", "Delete rows on or after this date (YYYY-MM-DD). Defaults to the Sunday that starts next week (current week preserved).")
+	cmd.Flags().BoolVar(&continueOnError, "continue-on-error", false, "Keep deleting subsequent rows after a failure (default: stop at first error)")
+	_ = cmd.MarkFlagRequired("user-id")
+	_ = cmd.MarkFlagRequired("project-id")
+	return cmd
+}
+
+// nextWeekSunday returns the YYYY-MM-DD of the Sunday that STARTS next week
+// relative to now. Used as the default --since cutoff: assignments are
+// week-anchored to Sunday, so rows with date >= nextWeekSunday(now) are
+// strictly in the future. The current week's row is preserved.
+func nextWeekSunday(now time.Time) string {
+	daysSinceSunday := int(now.Weekday()) // Sunday=0, Monday=1, …, Saturday=6
+	thisWeekSunday := now.AddDate(0, 0, -daysSinceSunday)
+	return thisWeekSunday.AddDate(0, 0, 7).Format("2006-01-02")
+}
+
+// listAssignmentsForRemoval fetches assignments for (user, project) with
+// date >= since. Sets a generous limit because Mariana-style sweeps can hit
+// dozens of weeks; paginates if needed up to ~1000 rows total.
+func listAssignmentsForRemoval(ctx context.Context, client *api.Client, userID, projectID, since string) ([]api.Assignment, error) {
+	var all []api.Assignment
+	for offset := 0; offset < 1000; offset += 200 {
+		q := url.Values{}
+		q.Set("user_id", userID)
+		q.Set("project_id", projectID)
+		q.Set("start_date", since)
+		q.Set("limit", fetchLimit)
+		if offset > 0 {
+			q.Set("offset", strconv.Itoa(offset))
+		}
+
+		var batch []api.Assignment
+		if err := client.Do(ctx, "GET", "/assignments", q, nil, &batch); err != nil {
+			return nil, fmt.Errorf("list assignments for removal: %w", err)
+		}
+		all = append(all, batch...)
+		if len(batch) < 200 {
+			break
+		}
+	}
+	return all, nil
 }
 
 func newAssignmentsDeleteCommand() *cobra.Command {
