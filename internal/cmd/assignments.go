@@ -608,46 +608,48 @@ func numberField(m map[string]any, key string) int {
 }
 
 func newAssignmentsDeleteCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete <id>",
-		Short: "Delete an assignment",
-		Args:  argsWithUsage(cobra.ExactArgs(1)),
-		Example: `  # Delete by assignment ID
-  supervisible assignments delete 019404f3-...`,
+	var continueOnError bool
+	cmd := &cobra.Command{
+		Use:   "delete <id> [<id>...]",
+		Short: "Delete one or more assignments",
+		Args:  argsWithUsage(cobra.MinimumNArgs(1)),
+		Example: `  # Delete by ID
+  supervisible assignments delete 019404f3-...
+
+  # Batch-delete in a single call (one bash invocation, N HTTP DELETEs)
+  supervisible assignments delete 019404f3-... 019404f4-... 019404f5-...
+
+  # Keep going if one delete returns 404 mid-batch
+  supervisible assignments delete --continue-on-error a b c`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
 				return err
 			}
-			if err := requireUUIDArg("id", args[0]); err != nil {
-				return err
+			for i, id := range args {
+				if err := requireUUIDArg(fmt.Sprintf("id[%d]", i), id); err != nil {
+					return err
+				}
 			}
 
-			query := app.ResolvedQuery("DELETE", "/assignments/{assignment_id}", nil)
-			plan := RequestPlan{
-				CommandPath:   "assignments delete",
-				Method:        "DELETE",
-				Endpoint:      "/assignments/" + args[0],
-				Query:         query,
-				RequiredScope: app.RequiredScope("DELETE", "/assignments/{assignment_id}"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
+			if app.DryRun() {
+				return previewBatchDelete(
+					app,
+					"assignments delete",
+					"/assignments/{assignment_id}",
+					"/assignments/",
+					app.RequiredScope("DELETE", "/assignments/{assignment_id}"),
+					args,
+				)
 			}
 
 			client, err := app.RequireClient()
 			if err != nil {
 				return err
 			}
-
-			if err := client.DeleteAssignment(cmd.Context(), args[0]); err != nil {
-				return err
-			}
-			if app.Printer().IsJSON() {
-				return app.PrintData(map[string]string{"id": args[0]})
-			}
-			app.Printer().Aux("Deleted assignment: %s", args[0])
-			return nil
+			return runBatchDelete(cmd.Context(), app, "assignment", args, client.DeleteAssignment, continueOnError)
 		},
 	}
+	cmd.Flags().BoolVar(&continueOnError, "continue-on-error", false, "Keep deleting subsequent IDs after a failure (default: stop at first error)")
+	return cmd
 }
