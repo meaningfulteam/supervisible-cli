@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -117,6 +118,7 @@ func newTimeOffCreateCommand() *cobra.Command {
 	var (
 		userID        string
 		timeOffTypeID string
+		typeName      string
 		startDate     string
 		endDate       string
 		availability  int
@@ -129,19 +131,33 @@ func newTimeOffCreateCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "create",
 		Short: "Create a time off request",
-		Example: `  # Create vacation request
+		Long: `Create a time-off request. Provide --time-off-type-id directly, OR pass
+--type-name "Vacation" to resolve the ID from /time-off-types by exact
+case-insensitive match (one extra GET on top of the create POST).`,
+		Example: `  # Resolve type name → id automatically
+  supervisible time-off create \
+    --user-id <uuid> --type-name Vacation \
+    --start-date 2026-07-15 --end-date 2026-07-19 \
+    --reason "Family trip"
+
+  # Explicit type ID (skip the lookup GET)
   supervisible time-off create \
     --user-id <uuid> --time-off-type-id <uuid> \
     --start-date 2026-07-15 --end-date 2026-07-19 \
     --reason "Family trip"`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if strings.TrimSpace(userID) == "" || strings.TrimSpace(timeOffTypeID) == "" || strings.TrimSpace(startDate) == "" || strings.TrimSpace(endDate) == "" || strings.TrimSpace(reason) == "" {
-				return fmt.Errorf("--user-id, --time-off-type-id, --start-date, --end-date and --reason are required")
+			hasTypeID := strings.TrimSpace(timeOffTypeID) != ""
+			hasTypeName := strings.TrimSpace(typeName) != ""
+			if hasTypeID && hasTypeName {
+				return fmt.Errorf("--time-off-type-id and --type-name are mutually exclusive")
+			}
+			if !hasTypeID && !hasTypeName {
+				return fmt.Errorf("one of --time-off-type-id or --type-name is required")
+			}
+			if strings.TrimSpace(userID) == "" || strings.TrimSpace(startDate) == "" || strings.TrimSpace(endDate) == "" || strings.TrimSpace(reason) == "" {
+				return fmt.Errorf("--user-id, --start-date, --end-date and --reason are required")
 			}
 			if err := requireUUIDArg("user-id", userID); err != nil {
-				return err
-			}
-			if err := requireUUIDArg("time-off-type-id", timeOffTypeID); err != nil {
 				return err
 			}
 			if err := validateOptionalDate("start-date", startDate); err != nil {
@@ -154,6 +170,19 @@ func newTimeOffCreateCommand() *cobra.Command {
 			app, err := appFromCommand(cmd)
 			if err != nil {
 				return err
+			}
+
+			if hasTypeName {
+				resolved, err := resolveTimeOffTypeID(cmd.Context(), app, typeName)
+				if err != nil {
+					return err
+				}
+				timeOffTypeID = resolved
+				app.Printer().Aux("time-off type resolved: %q → %s", typeName, resolved)
+			} else {
+				if err := requireUUIDArg("time-off-type-id", timeOffTypeID); err != nil {
+					return err
+				}
 			}
 
 			input := api.CreateTimeOffInput{
@@ -197,12 +226,14 @@ func newTimeOffCreateCommand() *cobra.Command {
 	}
 
 	cmd.Flags().StringVar(&userID, "user-id", "", "User ID (required)")
-	cmd.Flags().StringVar(&timeOffTypeID, "time-off-type-id", "", "Time off type ID (required)")
+	cmd.Flags().StringVar(&timeOffTypeID, "time-off-type-id", "", "Time off type ID (mutually exclusive with --type-name)")
+	cmd.Flags().StringVar(&typeName, "type-name", "", "Resolve the time off type ID by name via GET /time-off-types (case-insensitive exact match)")
 	cmd.Flags().StringVar(&startDate, "start-date", "", "Start date (YYYY-MM-DD, required)")
 	cmd.Flags().StringVar(&endDate, "end-date", "", "End date (YYYY-MM-DD, required)")
 	cmd.Flags().IntVar(&availability, "availability", 0, "Daily available hours (0-24)")
 	cmd.Flags().StringVar(&reason, "reason", "", "Reason (required)")
 	cmd.Flags().StringVar(&status, "status", "", "Optional status: pending|approved|rejected")
+	cmd.MarkFlagsMutuallyExclusive("time-off-type-id", "type-name")
 	cmd.Flags().StringVar(&payload, "payload", "", "Raw JSON payload object")
 	cmd.Flags().StringVar(&filePath, "file", "", "Path to JSON payload file")
 	cmd.MarkFlagsMutuallyExclusive("payload", "file")
@@ -458,4 +489,46 @@ func newTimeOffRejectCommand() *cobra.Command {
 	cmd.Flags().StringVar(&filePath, "file", "", "Path to JSON payload file")
 	cmd.MarkFlagsMutuallyExclusive("payload", "file")
 	return cmd
+}
+
+// resolveTimeOffTypeID fetches GET /time-off-types and returns the ID whose
+// name matches the input case-insensitively (exact match, not substring —
+// "Vacation" must not pick up "Vacation Day Off" silently). Errors loud if
+// zero or multiple matches.
+func resolveTimeOffTypeID(ctx context.Context, app *App, name string) (string, error) {
+	client, err := app.RequireClient()
+	if err != nil {
+		return "", err
+	}
+
+	q := url.Values{}
+	q.Set("limit", fetchLimit)
+
+	type timeOffType struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	}
+	var rows []timeOffType
+	if err := client.Do(ctx, "GET", "/time-off-types", q, nil, &rows); err != nil {
+		return "", fmt.Errorf("resolve time-off type %q: %w", name, err)
+	}
+
+	needle := strings.ToLower(strings.TrimSpace(name))
+	matches := make([]timeOffType, 0, 1)
+	for _, r := range rows {
+		if strings.ToLower(strings.TrimSpace(r.Name)) == needle {
+			matches = append(matches, r)
+		}
+	}
+	if len(matches) == 0 {
+		available := make([]string, 0, len(rows))
+		for _, r := range rows {
+			available = append(available, r.Name)
+		}
+		return "", fmt.Errorf("no time-off type named %q in this org (available: %s)", name, strings.Join(available, ", "))
+	}
+	if len(matches) > 1 {
+		return "", fmt.Errorf("multiple time-off types match %q; pass --time-off-type-id explicitly", name)
+	}
+	return matches[0].ID, nil
 }
