@@ -156,7 +156,17 @@ type apiErrorEnvelope struct {
 }
 
 type apiDataEnvelope struct {
-	Data json.RawMessage `json:"data"`
+	Data     json.RawMessage `json:"data"`
+	Warnings []Warning       `json:"warnings,omitempty"`
+}
+
+// Warning mirrors the server's PublicApiWarning envelope sibling. Surfaced
+// when the server attaches soft signals to a successful response (e.g.
+// time_off_overlap on POST /assignments).
+type Warning struct {
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Details map[string]any `json:"details,omitempty"`
 }
 
 // APIError is a normalized API failure.
@@ -217,6 +227,14 @@ func NormalizeBaseURL(raw string) (string, error) {
 }
 
 func (c *Client) request(ctx context.Context, method, endpoint string, query url.Values, body any, out any) error {
+	_, err := c.requestWithWarnings(ctx, method, endpoint, query, body, out)
+	return err
+}
+
+// requestWithWarnings is the underlying request executor. It returns any
+// server-side warnings attached to the response envelope. Existing callers
+// can keep using request() to discard them.
+func (c *Client) requestWithWarnings(ctx context.Context, method, endpoint string, query url.Values, body any, out any) ([]Warning, error) {
 	u := *c.baseURL
 	u.Path = path.Join(c.baseURL.Path, strings.TrimPrefix(endpoint, "/"))
 	if query != nil {
@@ -227,14 +245,14 @@ func (c *Client) request(ctx context.Context, method, endpoint string, query url
 	if body != nil {
 		encoded, err := json.Marshal(body)
 		if err != nil {
-			return fmt.Errorf("encode request body: %w", err)
+			return nil, fmt.Errorf("encode request body: %w", err)
 		}
 		payload = bytes.NewReader(encoded)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, method, u.String(), payload)
 	if err != nil {
-		return fmt.Errorf("create request: %w", err)
+		return nil, fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Accept", "application/json")
@@ -245,13 +263,13 @@ func (c *Client) request(ctx context.Context, method, endpoint string, query url
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request failed: %w", err)
+		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("read response body: %w", err)
+		return nil, fmt.Errorf("read response body: %w", err)
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -270,31 +288,45 @@ func (c *Client) request(ctx context.Context, method, endpoint string, query url
 				apiErr.RequestID = envelope.Error.RequestID
 			}
 		}
-		return apiErr
+		return nil, apiErr
 	}
 
-	if out == nil || len(responseBody) == 0 {
-		return nil
+	if len(responseBody) == 0 {
+		return nil, nil
 	}
 
 	var envelope apiDataEnvelope
-	if err := json.Unmarshal(responseBody, &envelope); err == nil && len(envelope.Data) > 0 {
-		if err := json.Unmarshal(envelope.Data, out); err != nil {
-			return fmt.Errorf("decode response data: %w", err)
+	if err := json.Unmarshal(responseBody, &envelope); err == nil && (len(envelope.Data) > 0 || len(envelope.Warnings) > 0) {
+		if out != nil && len(envelope.Data) > 0 {
+			if err := json.Unmarshal(envelope.Data, out); err != nil {
+				return envelope.Warnings, fmt.Errorf("decode response data: %w", err)
+			}
 		}
-		return nil
+		return envelope.Warnings, nil
+	}
+
+	if out == nil {
+		return nil, nil
 	}
 
 	if err := json.Unmarshal(responseBody, out); err != nil {
-		return fmt.Errorf("decode response: %w", err)
+		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
-	return nil
+	return nil, nil
 }
 
-// Do executes a raw API request against /api/v1 endpoints.
+// Do executes a raw API request against /api/v1 endpoints. Server warnings
+// are discarded — use DoWithWarnings to surface them.
 func (c *Client) Do(ctx context.Context, method, endpoint string, query url.Values, body any, out any) error {
 	return c.request(ctx, method, endpoint, query, body, out)
+}
+
+// DoWithWarnings is identical to Do but returns the server's `warnings`
+// envelope sibling (e.g. time_off_overlap on POST /assignments). Empty slice
+// when the server didn't attach any.
+func (c *Client) DoWithWarnings(ctx context.Context, method, endpoint string, query url.Values, body any, out any) ([]Warning, error) {
+	return c.requestWithWarnings(ctx, method, endpoint, query, body, out)
 }
 
 type Pagination struct {

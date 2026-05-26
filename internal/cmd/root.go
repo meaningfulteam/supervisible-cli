@@ -238,10 +238,28 @@ func (a *App) Execute(ctx context.Context, opts ExecuteOpts) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	if err := client.Do(ctx, opts.Method, path, query, opts.Body, opts.Out); err != nil {
+	warnings, err := client.DoWithWarnings(ctx, opts.Method, path, query, opts.Body, opts.Out)
+	if err != nil {
 		return false, err
 	}
+	a.surfaceWarnings(warnings)
 	return true, nil
+}
+
+// surfaceWarnings prints server-side response warnings to stderr. Quiet
+// when the server didn't attach any; one stderr line per warning otherwise,
+// shape: `warning: <code> — <message>`.
+func (a *App) surfaceWarnings(warnings []api.Warning) {
+	for _, w := range warnings {
+		if w.Message == "" {
+			continue
+		}
+		if w.Code != "" {
+			a.printer.Aux("warning: %s — %s", w.Code, w.Message)
+		} else {
+			a.printer.Aux("warning: %s", w.Message)
+		}
+	}
 }
 
 func withApp(ctx context.Context, app *App) context.Context {
