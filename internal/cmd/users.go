@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -51,6 +52,9 @@ func newUsersListCommand() *cobra.Command {
 			baseQuery := url.Values{}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
+			if nameFilter != "" {
+				baseQuery.Set("name", nameFilter)
+			}
 
 			var users []api.User
 			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
@@ -68,20 +72,16 @@ func newUsersListCommand() *cobra.Command {
 			}
 
 			getName := func(u api.User) string { return output.CoalesceString(u.Name) }
-			filtered := filterByName(users, nameFilter, getName)
-			if nameFilter != "" && len(users) >= limit {
-				app.Printer().Aux("note: list was paginated at %d rows before filtering by --name; pass --limit if you expect more", limit)
-			}
-			if nameFilter != "" && len(filtered) == 0 {
-				emitNameMissWarning(app.Printer().Aux, "users", users, nameFilter, getName)
+			if nameFilter != "" && len(users) == 0 {
+				suggestFromUnfilteredUsers(cmd.Context(), app, "users", nameFilter, getName)
 			}
 
 			if app.Printer().IsJSON() {
-				return app.PrintData(filtered)
+				return app.PrintData(users)
 			}
 
-			rows := make([][]string, 0, len(filtered))
-			for _, user := range filtered {
+			rows := make([][]string, 0, len(users))
+			for _, user := range users {
 				rows = append(rows, []string{
 					user.ID,
 					output.CoalesceString(user.Name),
@@ -97,8 +97,27 @@ func newUsersListCommand() *cobra.Command {
 
 	cmd.Flags().IntVar(&limit, "limit", 50, "Pagination limit")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Pagination offset")
-	cmd.Flags().StringVar(&nameFilter, "name", "", "Case-insensitive substring filter on the user's display name (applied after fetch)")
+	cmd.Flags().StringVar(&nameFilter, "name", "", "Case-insensitive substring filter on the user's display name (server-side via ?name=)")
 	return cmd
+}
+
+// suggestFromUnfilteredUsers fetches the first 200 users (no name filter) and
+// emits a did-you-mean stderr hint based on the closest names. Best-effort:
+// errors are swallowed so the empty result is still the user-facing answer.
+func suggestFromUnfilteredUsers(ctx context.Context, app *App, entity, nameFilter string, getName func(api.User) string) {
+	client, err := app.RequireClient()
+	if err != nil {
+		emitNameMissWarning(app.Printer().Aux, entity, nil, nameFilter, getName)
+		return
+	}
+	q := url.Values{}
+	q.Set("limit", fetchLimit)
+	var users []api.User
+	if err := client.Do(ctx, "GET", "/users", q, nil, &users); err != nil {
+		emitNameMissWarning(app.Printer().Aux, entity, nil, nameFilter, getName)
+		return
+	}
+	emitNameMissWarning(app.Printer().Aux, entity, users, nameFilter, getName)
 }
 
 func newUsersUpdateCommand() *cobra.Command {

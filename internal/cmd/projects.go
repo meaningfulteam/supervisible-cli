@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -53,6 +54,9 @@ func newProjectsListCommand() *cobra.Command {
 			baseQuery := url.Values{}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
+			if nameFilter != "" {
+				baseQuery.Set("name", nameFilter)
+			}
 
 			var projects []api.Project
 			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
@@ -70,20 +74,16 @@ func newProjectsListCommand() *cobra.Command {
 			}
 
 			getName := func(p api.Project) string { return p.Name }
-			filtered := filterByName(projects, nameFilter, getName)
-			if nameFilter != "" && len(projects) >= limit {
-				app.Printer().Aux("note: list was paginated at %d rows before filtering by --name; pass --limit if you expect more", limit)
-			}
-			if nameFilter != "" && len(filtered) == 0 {
-				emitNameMissWarning(app.Printer().Aux, "projects", projects, nameFilter, getName)
+			if nameFilter != "" && len(projects) == 0 {
+				suggestFromUnfilteredProjects(cmd.Context(), app, "projects", nameFilter, getName)
 			}
 
 			if app.Printer().IsJSON() {
-				return app.PrintData(filtered)
+				return app.PrintData(projects)
 			}
 
-			rows := make([][]string, 0, len(filtered))
-			for _, project := range filtered {
+			rows := make([][]string, 0, len(projects))
+			for _, project := range projects {
 				rows = append(rows, []string{
 					project.ID,
 					project.Name,
@@ -99,8 +99,26 @@ func newProjectsListCommand() *cobra.Command {
 
 	cmd.Flags().IntVar(&limit, "limit", 50, "Pagination limit")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Pagination offset")
-	cmd.Flags().StringVar(&nameFilter, "name", "", "Case-insensitive substring filter on the project name (applied after fetch)")
+	cmd.Flags().StringVar(&nameFilter, "name", "", "Case-insensitive substring filter on the project name (server-side via ?name=)")
 	return cmd
+}
+
+// suggestFromUnfilteredProjects fetches the first 200 projects and emits a
+// did-you-mean stderr hint when --name returned zero matches. Best-effort.
+func suggestFromUnfilteredProjects(ctx context.Context, app *App, entity, nameFilter string, getName func(api.Project) string) {
+	client, err := app.RequireClient()
+	if err != nil {
+		emitNameMissWarning(app.Printer().Aux, entity, nil, nameFilter, getName)
+		return
+	}
+	q := url.Values{}
+	q.Set("limit", fetchLimit)
+	var projects []api.Project
+	if err := client.Do(ctx, "GET", "/projects", q, nil, &projects); err != nil {
+		emitNameMissWarning(app.Printer().Aux, entity, nil, nameFilter, getName)
+		return
+	}
+	emitNameMissWarning(app.Printer().Aux, entity, projects, nameFilter, getName)
 }
 
 func newProjectsCreateCommand() *cobra.Command {

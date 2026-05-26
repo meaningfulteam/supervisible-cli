@@ -1,9 +1,7 @@
 package cmd
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -100,50 +98,44 @@ func TestBuildWhoisReport_WeekSummaryIgnoresFutureWeeks(t *testing.T) {
 	}
 }
 
-func TestEnrichAssignmentsWithClient_PopulatesClient(t *testing.T) {
-	resolver := newProjectClientResolver(nil)
-	resolver.loadFn = func(ctx context.Context) (map[string]*ProjectClient, error) {
-		return map[string]*ProjectClient{
-			"p1": {ID: "c1", Name: "EdVisorly"},
-		}, nil
+func TestBuildWhoisReport_PopulatesClientFromExpandedAssignment(t *testing.T) {
+	user := api.User{ID: "u1", Email: "u1@test.com", DefaultAvailability: 40}
+	cap := "cap-1"
+	assignments := []api.Assignment{
+		{
+			ID:           "a1",
+			UserID:       "u1",
+			ProjectID:    "p1",
+			CapabilityID: &cap,
+			Date:         "2026-05-18",
+			Hours:        4,
+			Project:      &api.ExpandedProject{ID: "p1", Name: "Marketplace"},
+			Client:       &api.ExpandedClient{ID: "c1", CompanyName: "EdVisorly"},
+		},
+		{
+			ID:           "a2",
+			UserID:       "u1",
+			ProjectID:    "p2",
+			CapabilityID: &cap,
+			Date:         "2026-05-18",
+			Hours:        2,
+			Project:      &api.ExpandedProject{ID: "p2", Name: "Avask Web"},
+			// No Client expansion — should leave Client nil.
+		},
 	}
+	weekStart := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
+	weekEnd := weekStart.AddDate(0, 0, 6)
 
-	assignments := []WhoisAssignment{
-		{ID: "a1", ProjectID: "p1", Hours: 4},
-		{ID: "a2", ProjectID: "p-unknown", Hours: 2},
-	}
-	enrichAssignmentsWithClient(context.Background(), resolver, assignments, nil)
+	report := buildWhoisReport(user, assignments, nil, weekStart, weekEnd)
 
-	if assignments[0].Client == nil || assignments[0].Client.Name != "EdVisorly" {
-		t.Fatalf("expected p1 enriched with EdVisorly, got %+v", assignments[0].Client)
+	if len(report.Assignments) != 2 {
+		t.Fatalf("expected 2 assignments, got %d", len(report.Assignments))
 	}
-	if assignments[1].Client != nil {
-		t.Fatalf("expected p-unknown nil client, got %+v", assignments[1].Client)
+	if report.Assignments[0].Client == nil || report.Assignments[0].Client.Name != "EdVisorly" {
+		t.Fatalf("expected client EdVisorly on a1, got %+v", report.Assignments[0].Client)
 	}
-}
-
-func TestEnrichAssignmentsWithClient_FetchFailureKeepsClientNil(t *testing.T) {
-	resolver := newProjectClientResolver(nil)
-	resolver.loadFn = func(ctx context.Context) (map[string]*ProjectClient, error) {
-		return nil, errors.New("boom")
-	}
-
-	assignments := []WhoisAssignment{
-		{ID: "a1", ProjectID: "p1", Hours: 4},
-		{ID: "a2", ProjectID: "p2", Hours: 2},
-	}
-	calls := 0
-	enrichAssignmentsWithClient(context.Background(), resolver, assignments, func(err error) {
-		calls++
-	})
-
-	if calls != 1 {
-		t.Fatalf("expected callback once, got %d", calls)
-	}
-	for _, a := range assignments {
-		if a.Client != nil {
-			t.Fatalf("expected nil client after fetch failure on %s, got %+v", a.ID, a.Client)
-		}
+	if report.Assignments[1].Client != nil {
+		t.Fatalf("expected nil client on a2 (no expand), got %+v", report.Assignments[1].Client)
 	}
 }
 
