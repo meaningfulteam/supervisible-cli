@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -127,13 +126,14 @@ Matches by case-insensitive substring on name, or exact match on email
 			startStr := formatDate(weekStart)
 			endStr := formatDate(windowEnd)
 
-			// Fetch assignments across the full window
+			// Fetch assignments across the full window. expand=client surfaces the
+			// project's client in the same call (nested expand, server-side join).
 			assignQuery := url.Values{}
 			assignQuery.Set("user_id", user.ID)
 			assignQuery.Set("start_date", startStr)
 			assignQuery.Set("end_date", endStr)
 			assignQuery.Set("limit", fetchLimit)
-			assignQuery.Set("expand", "project")
+			assignQuery.Set("expand", "project,client")
 			assignQuery = app.ResolvedQuery("GET", "/assignments", assignQuery)
 
 			var assignments []api.Assignment
@@ -156,17 +156,10 @@ Matches by case-insensitive substring on name, or exact match on email
 			}
 
 			// WeekSummary stays scoped to the current week for backward compatibility.
+			// Client linkage comes back via expand=client on the assignments fetch
+			// above — no second HTTP call needed.
 			report := buildWhoisReport(user, assignments, timeOff, weekStart, weekEnd)
 			report.WeeksCovered = weeks
-
-			// Enrich assignments with their client linkage (best-effort).
-			// Skip the bulk projects fetch entirely when there's nothing to enrich.
-			if len(report.Assignments) > 0 {
-				resolver := newProjectClientResolver(client)
-				enrichAssignmentsWithClient(ctx, resolver, report.Assignments, func(err error) {
-					app.Printer().Aux("warning: could not load project/client map; client field omitted (%v)", err)
-				})
-			}
 
 			if app.Printer().IsJSON() {
 				return app.PrintData(report)
@@ -232,11 +225,16 @@ func buildWhoisReport(user api.User, assignments []api.Assignment, timeOff []api
 		if a.Project != nil {
 			projName = a.Project.Name
 		}
+		var clientInfo *WhoisClient
+		if a.Client != nil {
+			clientInfo = &WhoisClient{ID: a.Client.ID, Name: a.Client.CompanyName}
+		}
 		report.Assignments = append(report.Assignments, WhoisAssignment{
 			ID:           a.ID,
 			ProjectID:    a.ProjectID,
 			CapabilityID: output.CoalesceString(a.CapabilityID),
 			Project:      projName,
+			Client:       clientInfo,
 			Date:         a.Date,
 			Hours:        a.Hours,
 		})
@@ -330,19 +328,6 @@ func printWhoisProfile(p *output.Printer, report WhoisReport, isoWeek, isoYear i
 	}
 
 	return nil
-}
-
-// enrichAssignmentsWithClient sets a.Client for every assignment whose project is
-// resolvable. Fail-soft: if the resolver's bulk fetch fails, onError fires once
-// and every assignment keeps Client=nil.
-func enrichAssignmentsWithClient(ctx context.Context, resolver *projectClientResolver, assignments []WhoisAssignment, onError func(error)) {
-	for i := range assignments {
-		c := resolver.Resolve(ctx, assignments[i].ProjectID, onError)
-		if c == nil {
-			continue
-		}
-		assignments[i].Client = &WhoisClient{ID: c.ID, Name: c.Name}
-	}
 }
 
 // aggregateByProjectInWindow returns "ProjectA (Nh), ProjectB (Mh)" for assignments

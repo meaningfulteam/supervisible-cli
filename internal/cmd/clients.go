@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strconv"
@@ -54,6 +55,9 @@ func newClientsListCommand() *cobra.Command {
 			baseQuery := url.Values{}
 			baseQuery.Set("limit", strconv.Itoa(limit))
 			baseQuery.Set("offset", strconv.Itoa(offset))
+			if nameFilter != "" {
+				baseQuery.Set("name", nameFilter)
+			}
 
 			var clients []api.ClientResource
 			executed, err := app.Execute(cmd.Context(), ExecuteOpts{
@@ -71,20 +75,16 @@ func newClientsListCommand() *cobra.Command {
 			}
 
 			getName := func(c api.ClientResource) string { return c.CompanyName }
-			filtered := filterByName(clients, nameFilter, getName)
-			if nameFilter != "" && len(clients) >= limit {
-				app.Printer().Aux("note: list was paginated at %d rows before filtering by --name; pass --limit if you expect more", limit)
-			}
-			if nameFilter != "" && len(filtered) == 0 {
-				emitNameMissWarning(app.Printer().Aux, "clients", clients, nameFilter, getName)
+			if nameFilter != "" && len(clients) == 0 {
+				suggestFromUnfilteredClients(cmd.Context(), app, "clients", nameFilter, getName)
 			}
 
 			if app.Printer().IsJSON() {
-				return app.PrintData(filtered)
+				return app.PrintData(clients)
 			}
 
-			rows := make([][]string, 0, len(filtered))
-			for _, c := range filtered {
+			rows := make([][]string, 0, len(clients))
+			for _, c := range clients {
 				rows = append(rows, []string{
 					c.ID,
 					c.CompanyName,
@@ -99,8 +99,26 @@ func newClientsListCommand() *cobra.Command {
 
 	cmd.Flags().IntVar(&limit, "limit", 50, "Pagination limit")
 	cmd.Flags().IntVar(&offset, "offset", 0, "Pagination offset")
-	cmd.Flags().StringVar(&nameFilter, "name", "", "Case-insensitive substring filter on the company name (applied after fetch)")
+	cmd.Flags().StringVar(&nameFilter, "name", "", "Case-insensitive substring filter on the company name (server-side via ?name=)")
 	return cmd
+}
+
+// suggestFromUnfilteredClients fetches the first 200 clients and emits a
+// did-you-mean stderr hint when --name returned zero matches. Best-effort.
+func suggestFromUnfilteredClients(ctx context.Context, app *App, entity, nameFilter string, getName func(api.ClientResource) string) {
+	client, err := app.RequireClient()
+	if err != nil {
+		emitNameMissWarning(app.Printer().Aux, entity, nil, nameFilter, getName)
+		return
+	}
+	q := url.Values{}
+	q.Set("limit", fetchLimit)
+	var clients []api.ClientResource
+	if err := client.Do(ctx, "GET", "/clients", q, nil, &clients); err != nil {
+		emitNameMissWarning(app.Printer().Aux, entity, nil, nameFilter, getName)
+		return
+	}
+	emitNameMissWarning(app.Printer().Aux, entity, clients, nameFilter, getName)
 }
 
 func newClientsCreateCommand() *cobra.Command {

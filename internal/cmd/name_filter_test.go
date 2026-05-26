@@ -46,14 +46,39 @@ func TestFilterByName_WhitespaceNeedleTreatedAsEmpty(t *testing.T) {
 	}
 }
 
-func TestUsersList_NameFilterAppliedPostFetch(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+// nameFilteredUsersServer returns a substring-filtered list when ?name= is set
+// (mimicking the server-side ILIKE filter that #883 added), and the full list
+// when the param is absent (so the did-you-mean fallback path also works).
+func nameFilteredUsersServer(t *testing.T, all string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[
-			{"id":"u1","name":"Mariana Miquelajauregui","email":"m@m8l.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
-			{"id":"u2","name":"Juan Méndez","email":"j@m8l.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
-		]}`))
+		needle := strings.ToLower(r.URL.Query().Get("name"))
+		if needle == "" {
+			_, _ = w.Write([]byte(all))
+			return
+		}
+		var payload struct {
+			Data []map[string]any `json:"data"`
+		}
+		_ = json.Unmarshal([]byte(all), &payload)
+		filtered := make([]map[string]any, 0, len(payload.Data))
+		for _, row := range payload.Data {
+			name, _ := row["name"].(string)
+			if strings.Contains(strings.ToLower(name), needle) {
+				filtered = append(filtered, row)
+			}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": filtered})
 	}))
+}
+
+func TestUsersList_NameFilterPassesThroughToServer(t *testing.T) {
+	const all = `{"data":[
+		{"id":"u1","name":"Mariana Miquelajauregui","email":"m@m8l.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
+		{"id":"u2","name":"Juan Méndez","email":"j@m8l.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
+	]}`
+	server := nameFilteredUsersServer(t, all)
 	defer server.Close()
 
 	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
@@ -74,35 +99,6 @@ func TestUsersList_NameFilterAppliedPostFetch(t *testing.T) {
 	}
 	if len(got) != 1 || got[0]["id"] != "u1" {
 		t.Fatalf("expected only Mariana; got %v", got)
-	}
-}
-
-func TestUsersList_NameFilterPaginationNote(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		// 2 rows returned and --limit=2 → pagination note should fire.
-		_, _ = w.Write([]byte(`{"data":[
-			{"id":"u1","name":"Mariana","email":"a@b.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
-			{"id":"u2","name":"Juan","email":"c@d.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
-		]}`))
-	}))
-	defer server.Close()
-
-	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
-	t.Setenv("SUPERVISIBLE_BASE_URL", server.URL)
-
-	_, stderr, err := executeCLI(t,
-		"--config", testConfigPath(t),
-		"--json",
-		"users", "list",
-		"--name", "juan",
-		"--limit", "2",
-	)
-	if err != nil {
-		t.Fatalf("command failed: %v", err)
-	}
-	if !strings.Contains(stderr, "paginated at 2 rows") {
-		t.Fatalf("expected pagination note on stderr, got: %q", stderr)
 	}
 }
 
@@ -137,13 +133,11 @@ func TestSuggestNames_NothingCloseReturnsNil(t *testing.T) {
 }
 
 func TestUsersList_NameFilterEmitsSuggestionOnZeroMatch(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[
-			{"id":"u1","name":"Mariana Miquelajauregui","email":"a@b.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
-			{"id":"u2","name":"Marina Diaz","email":"c@d.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
-		]}`))
-	}))
+	const all = `{"data":[
+		{"id":"u1","name":"Mariana Miquelajauregui","email":"a@b.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"},
+		{"id":"u2","name":"Marina Diaz","email":"c@d.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
+	]}`
+	server := nameFilteredUsersServer(t, all)
 	defer server.Close()
 
 	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
@@ -163,32 +157,5 @@ func TestUsersList_NameFilterEmitsSuggestionOnZeroMatch(t *testing.T) {
 	}
 	if strings.TrimSpace(stdout) != "[]" {
 		t.Fatalf("expected stdout=[] on no match, got: %q", stdout)
-	}
-}
-
-func TestUsersList_NameFilterNoPaginationNoteWhenBelowLimit(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"data":[
-			{"id":"u1","name":"Mariana","email":"a@b.com","userType":"member","isActive":true,"defaultAvailability":40,"createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z"}
-		]}`))
-	}))
-	defer server.Close()
-
-	t.Setenv("SUPERVISIBLE_API_KEY", "test-token")
-	t.Setenv("SUPERVISIBLE_BASE_URL", server.URL)
-
-	_, stderr, err := executeCLI(t,
-		"--config", testConfigPath(t),
-		"--json",
-		"users", "list",
-		"--name", "mariana",
-		"--limit", "50",
-	)
-	if err != nil {
-		t.Fatalf("command failed: %v", err)
-	}
-	if strings.Contains(stderr, "paginated at") {
-		t.Fatalf("did not expect pagination note (1 row < limit 50), got: %q", stderr)
 	}
 }

@@ -162,6 +162,7 @@ type Assignment struct {
 	User       *ExpandedUser       `json:"user,omitempty"`
 	Project    *ExpandedProject    `json:"project,omitempty"`
 	Capability *ExpandedCapability `json:"capability,omitempty"`
+	Client     *ExpandedClient     `json:"client,omitempty"`
 }
 
 type AssignmentInput struct {
