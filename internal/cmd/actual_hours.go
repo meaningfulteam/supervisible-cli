@@ -240,46 +240,48 @@ func newActualHoursUpsertCommand() *cobra.Command {
 }
 
 func newActualHoursDeleteCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "delete <id>",
-		Short: "Delete an actual hour entry",
-		Args:  argsWithUsage(cobra.ExactArgs(1)),
-		Example: `  # Delete by actual-hour ID
-  supervisible actual-hours delete 019404f3-...`,
+	var continueOnError bool
+	cmd := &cobra.Command{
+		Use:   "delete <id> [<id>...]",
+		Short: "Delete one or more actual-hour entries",
+		Args:  argsWithUsage(cobra.MinimumNArgs(1)),
+		Example: `  # Delete by ID
+  supervisible actual-hours delete 019404f3-...
+
+  # Batch-delete in a single call (one bash invocation, N HTTP DELETEs)
+  supervisible actual-hours delete 019404f3-... 019404f4-... 019404f5-...
+
+  # Keep going if one delete returns 404 mid-batch
+  supervisible actual-hours delete --continue-on-error a b c`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			app, err := appFromCommand(cmd)
 			if err != nil {
 				return err
 			}
-			if err := requireUUIDArg("id", args[0]); err != nil {
-				return err
+			for i, id := range args {
+				if err := requireUUIDArg(fmt.Sprintf("id[%d]", i), id); err != nil {
+					return err
+				}
 			}
 
-			query := app.ResolvedQuery("DELETE", "/actual-hours/{actual_hour_id}", nil)
-			plan := RequestPlan{
-				CommandPath:   "actual-hours delete",
-				Method:        "DELETE",
-				Endpoint:      "/actual-hours/" + args[0],
-				Query:         query,
-				RequiredScope: app.RequiredScope("DELETE", "/actual-hours/{actual_hour_id}"),
-			}
-			if app.MaybeDryRun(plan) {
-				return nil
+			if app.DryRun() {
+				return previewBatchDelete(
+					app,
+					"actual-hours delete",
+					"/actual-hours/{actual_hour_id}",
+					"/actual-hours/",
+					app.RequiredScope("DELETE", "/actual-hours/{actual_hour_id}"),
+					args,
+				)
 			}
 
 			client, err := app.RequireClient()
 			if err != nil {
 				return err
 			}
-
-			if err := client.DeleteActualHour(cmd.Context(), args[0]); err != nil {
-				return err
-			}
-			if app.Printer().IsJSON() {
-				return app.PrintData(map[string]string{"id": args[0]})
-			}
-			app.Printer().Aux("Deleted actual-hour: %s", args[0])
-			return nil
+			return runBatchDelete(cmd.Context(), app, "actual-hour", args, client.DeleteActualHour, continueOnError)
 		},
 	}
+	cmd.Flags().BoolVar(&continueOnError, "continue-on-error", false, "Keep deleting subsequent IDs after a failure (default: stop at first error)")
+	return cmd
 }
