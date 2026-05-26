@@ -41,21 +41,3 @@ snapshot:
 
 changelog:
   use: git
-
-brews:
-  - name: supervisible
-    ids: [supervisible]
-    homepage: https://supervisible.com
-    description: Supervisible command-line interface
-    license: MIT
-    repository:
-      owner: supervisible
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    commit_author:
-      name: supervisible-bot
-      email: ops@supervisible.com
-    install: |
-      bin.install "supervisible"
-    test: |
-      system "#{bin}/supervisible", "version"

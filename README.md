@@ -3,7 +3,6 @@
 [![CI](https://github.com/supervisible/supervisible-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/supervisible/supervisible-cli/actions/workflows/ci.yml)
 [![Go](https://img.shields.io/badge/go-1.24-blue)](https://go.dev)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Homebrew](https://img.shields.io/badge/homebrew-supervisible%2Ftap-orange)](https://github.com/supervisible/homebrew-tap)
 
 The official Go CLI for the [Supervisible](https://supervisible.com) Public API.
 
@@ -22,15 +21,27 @@ The official Go CLI for the [Supervisible](https://supervisible.com) Public API.
 ## Quickstart
 
 ```bash
-# Install
-brew tap supervisible/tap
-brew install supervisible
+# Install (requires Go 1.24+)
+go install github.com/supervisible/supervisible-cli/cmd/supervisible@latest
 
 # Authenticate
 supervisible auth login --api-key sv_live_xxx
 
 # First command
 supervisible me --json
+```
+
+Prebuilt binaries for macOS, Linux, and Windows are attached to every [GitHub release](https://github.com/supervisible/supervisible-cli/releases) — download, extract, and drop on your `PATH`.
+
+### One-liner for Openclaw / Claude Code agents
+
+Installs the CLI and the `supervisible` skill so agents can discover it:
+
+```bash
+go install github.com/supervisible/supervisible-cli/cmd/supervisible@latest && \
+  mkdir -p ~/.claude/skills/supervisible && \
+  curl -fsSL https://raw.githubusercontent.com/supervisible/supervisible-cli/main/skills/supervisible/SKILL.md \
+    -o ~/.claude/skills/supervisible/SKILL.md
 ```
 
 ---
